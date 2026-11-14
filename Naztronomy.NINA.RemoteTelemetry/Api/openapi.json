@@ -125,6 +125,118 @@
         }
       }
     },
+    "/api/v1/sequence/targets": {
+      "get": {
+        "tags": ["Overview"],
+        "summary": "Advanced Sequencer targets with exposure progress and time estimates",
+        "description": "Reads every Deep Sky Object container in the Advanced Sequence (on NINA's UI thread, cached for 20 s). Exposure blocks are Take Many Exposures / Smart Exposure instructions, or Take Exposure inside a loop. Blocks without a loop-count condition (e.g. 'loop until time') have `total: null` and are counted as open-ended.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "updatedUtc": { "type": "string", "format": "date-time" },
+                    "isRunning": { "type": "boolean" },
+                    "imagedSeconds": {
+                      "type": "number",
+                      "description": "Exposure time already taken across all targets"
+                    },
+                    "remainingSeconds": {
+                      "type": "number",
+                      "description": "Exposure time left in blocks with a known count"
+                    },
+                    "openEnded": {
+                      "type": "boolean",
+                      "description": "Some unfinished blocks have no fixed count"
+                    },
+                    "error": { "type": "string", "nullable": true },
+                    "targets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": { "type": "string" },
+                          "status": {
+                            "type": "string",
+                            "example": "RUNNING",
+                            "description": "NINA sequence status: CREATED, RUNNING, FINISHED, FAILED, SKIPPED, DISABLED"
+                          },
+                          "ra": { "type": "string", "nullable": true },
+                          "dec": { "type": "string", "nullable": true },
+                          "conditions": {
+                            "type": "string",
+                            "nullable": true,
+                            "example": "until 04:30"
+                          },
+                          "imagedSeconds": { "type": "number" },
+                          "remainingSeconds": { "type": "number" },
+                          "openEnded": { "type": "boolean" },
+                          "blocks": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "example": "Take Many Exposures"
+                                },
+                                "status": { "type": "string" },
+                                "filter": {
+                                  "type": "string",
+                                  "nullable": true,
+                                  "description": "From the block's or a preceding Switch Filter; null means the current filter"
+                                },
+                                "imageType": {
+                                  "type": "string",
+                                  "example": "LIGHT"
+                                },
+                                "exposureSeconds": { "type": "number" },
+                                "done": { "type": "integer" },
+                                "total": {
+                                  "type": "integer",
+                                  "nullable": true
+                                },
+                                "condition": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "imagedSeconds": { "type": "number" },
+                                "remainingSeconds": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            }
+                          },
+                          "captured": {
+                            "type": "array",
+                            "nullable": true,
+                            "description": "NINA's per-target Exposure Info list",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "filter": { "type": "string" },
+                                "count": { "type": "integer" },
+                                "exposureSeconds": { "type": "number" },
+                                "imageType": { "type": "string" }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
     "/api/v1/devices": {
       "get": {
         "tags": ["Equipment"],

@@ -88,7 +88,13 @@ const KEYS = {
   view: "nina-remote-telemetry.view",
   night: "nina-remote-telemetry.night",
   timeMode: "nina-remote-telemetry.timeMode",
+  tab: "nina-remote-telemetry.tab",
 };
+
+let deviceTab = localStorage.getItem(KEYS.tab) === "ts" ? "ts" : "overview";
+
+const tsAvailable = (feed) =>
+  !!(feed.status?.scheduler?.enabled && feed.status.scheduler.apiReachable);
 
 // Times are shown in each NINA's own time zone unless the user picks "My time".
 let timeMode = localStorage.getItem(KEYS.timeMode) || "observatory";
@@ -218,6 +224,7 @@ class Feed {
     this.isGuiding = false;
     this.plan = null;
     this.progress = null;
+    this.seqTargets = null;
     this.lastImageId = undefined;
     this.lastIssueId = undefined;
     this.startedUtc = null;
@@ -233,6 +240,7 @@ class Feed {
       if (sub.needs.includes("issues")) this.fetchIssues();
       if (sub.needs.includes("plan")) this.fetchPlan();
       if (sub.needs.includes("progress")) this.fetchProgress();
+      if (sub.needs.includes("seqTargets")) this.fetchSeqTargets();
     }
     return () => {
       this.subs.delete(sub);
@@ -258,6 +266,8 @@ class Feed {
     this.guideTimer = setInterval(() => this.pollGuiding(), GUIDE_MS);
     this.planTimer = setInterval(() => this.fetchPlan(), PLAN_MS);
     this.progressTimer = setInterval(() => this.fetchProgress(), PROGRESS_MS);
+    this.fetchSeqTargets();
+    this.seqTimer = setInterval(() => this.fetchSeqTargets(), 30000);
   }
 
   stop() {
@@ -266,6 +276,7 @@ class Feed {
     clearInterval(this.guideTimer);
     clearInterval(this.planTimer);
     clearInterval(this.progressTimer);
+    clearInterval(this.seqTimer);
     clearTimeout(this.planRetry);
   }
 
@@ -380,6 +391,16 @@ class Feed {
       "POST",
     );
     this.emit("plan");
+  }
+
+  async fetchSeqTargets() {
+    if (!this.needs("seqTargets")) return;
+    try {
+      this.seqTargets = await api(this.dev, "/api/v1/sequence/targets", 20000);
+      this.emit("seqTargets");
+    } catch {
+      /* surfaced by status poll */
+    }
   }
 
   async fetchProgress() {
@@ -699,6 +720,8 @@ const CARDS = {
     title: "Scheduler: now",
     span: 2,
     needs: [],
+    tabs: ["overview", "ts"],
+    available: (feed) => tsAvailable(feed),
     mount(body, feed) {
       const pill = el("span");
       const headline = el("div", { class: "ts-headline" });
@@ -808,6 +831,7 @@ const CARDS = {
     title: "Tonight's plan",
     span: 4,
     needs: ["plan"],
+    tabs: ["ts"],
     mount(body, feed) {
       const btn = el("button", { type: "button" }, "Refresh now");
       const info = el("span", { class: "muted small" });
@@ -970,6 +994,7 @@ const CARDS = {
     title: "Project progress",
     span: 4,
     needs: ["progress"],
+    tabs: ["ts"],
     mount(body, feed) {
       const prefKey = "nina-remote-telemetry.progressFilters";
       const prefs = readJson(prefKey, { done: false, inactive: false });
@@ -1300,6 +1325,231 @@ const CARDS = {
       }
       return (kind) => {
         if (kind === "progress" || kind === "all") render();
+      };
+    },
+  },
+
+  sequenceTargets: {
+    title: "Sequence targets",
+    span: 4,
+    needs: ["seqTargets"],
+    // Hidden in Full view when the sequence has no Deep Sky Object containers.
+    available: (feed) =>
+      !feed.seqTargets || feed.seqTargets.targets?.length > 0,
+    mount(body, feed) {
+      const prefKey = "nina-remote-telemetry.sequenceFilters";
+      const showDone = el("input", {
+        type: "checkbox",
+        checked: readJson(prefKey, { done: false }).done,
+      });
+      const info = el("span", { class: "muted small" });
+      const err = el("span", { class: "error small" });
+      const summary = el("div", { class: "small ts-summary" });
+      const list = el("div", { class: "ts-projects" });
+      body.append(
+        el(
+          "div",
+          { class: "toolbar" },
+          el("label", { class: "small" }, showDone, " show finished"),
+          info,
+          err,
+        ),
+        summary,
+        list,
+      );
+      const expanded = new Set();
+      const ICONS = {
+        RUNNING: "▶",
+        FINISHED: "✓",
+        FAILED: "✕",
+        SKIPPED: "⤼",
+        DISABLED: "⊘",
+      };
+      const finished = (s) => ["FINISHED", "SKIPPED", "DISABLED"].includes(s);
+
+      const bar = (pct) => {
+        const fill = el("div", { class: "bar-fill" });
+        fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+        return el("div", { class: "bar compact" }, fill);
+      };
+
+      const blocksTable = (blocks) =>
+        el(
+          "table",
+          { class: "ts-filters" },
+          el(
+            "thead",
+            null,
+            el(
+              "tr",
+              null,
+              ...[
+                "Instruction",
+                "Filter",
+                "Exp",
+                "Progress",
+                "Done",
+                "Imaged",
+                "Remaining",
+              ].map((h) => el("th", { text: h })),
+            ),
+          ),
+          el(
+            "tbody",
+            null,
+            ...blocks.map((b) =>
+              el(
+                "tr",
+                { class: b.status === "FINISHED" ? "muted" : null },
+                el("td", { text: `${ICONS[b.status] ?? "•"} ${b.name}` }),
+                el("td", { text: b.filter ?? "(current)" }),
+                el("td", { text: fmt.num(b.exposureSeconds, 0, "s") ?? "" }),
+                el(
+                  "td",
+                  { class: "bar-cell" },
+                  b.total
+                    ? bar((100 * b.done) / b.total)
+                    : el("span", {
+                        class: "muted small",
+                        text: b.condition ?? "open-ended",
+                      }),
+                ),
+                el("td", {
+                  text: b.total ? `${b.done} / ${b.total}` : String(b.done),
+                }),
+                el("td", { text: fmt.duration(b.imagedSeconds) ?? "" }),
+                el("td", {
+                  text:
+                    b.remainingSeconds == null
+                      ? "—"
+                      : b.remainingSeconds > 0
+                        ? fmt.duration(b.remainingSeconds)
+                        : "✓",
+                }),
+              ),
+            ),
+          ),
+        );
+
+      const targetRow = (t, i) => {
+        const key = `${i}:${t.name}`;
+        const open = expanded.has(key);
+        const total = (t.imagedSeconds || 0) + (t.remainingSeconds || 0);
+        const pct = finished(t.status)
+          ? 100
+          : total > 0
+            ? (100 * t.imagedSeconds) / total
+            : 0;
+        const text = t.error
+          ? t.error
+          : [
+              `${fmt.duration(t.imagedSeconds) || "0m"} imaged`,
+              t.remainingSeconds > 0
+                ? `${fmt.duration(t.remainingSeconds)} left`
+                : null,
+              t.openEnded ? "plus open-ended blocks" : null,
+            ]
+              .filter(Boolean)
+              .join(" · ");
+        const captured = t.captured?.length
+          ? `Captured so far: ${t.captured.map((c) => `${c.filter || "?"} ${c.count}× ${fmt.num(c.exposureSeconds, 0)}s`).join(", ")}`
+          : null;
+        const details = el(
+          "div",
+          { class: "ts-details", hidden: !open },
+          t.blocks?.length
+            ? blocksTable(t.blocks)
+            : el("div", {
+                class: "muted small",
+                text: "No exposure instructions in this target.",
+              }),
+          t.conditions
+            ? el("div", { class: "muted small", text: `Loop: ${t.conditions}` })
+            : null,
+          captured ? el("div", { class: "muted small", text: captured }) : null,
+        );
+        const toggle = el(
+          "button",
+          { type: "button", class: "small-btn" },
+          open ? "Hide" : "Details",
+        );
+        toggle.addEventListener("click", () => {
+          const nowOpen = !expanded.has(key);
+          if (nowOpen) expanded.add(key);
+          else expanded.delete(key);
+          details.hidden = !nowOpen;
+          toggle.textContent = nowOpen ? "Hide" : "Details";
+        });
+        return el(
+          "div",
+          {
+            class: `ts-target${t.status === "RUNNING" ? " running" : ""}${finished(t.status) ? " off" : ""}`,
+          },
+          el(
+            "div",
+            { class: "ts-target-head" },
+            el("span", {
+              class: "seq-icon",
+              text: ICONS[t.status] ?? "•",
+              title: t.status,
+            }),
+            el("strong", {
+              text: t.name,
+              title: t.ra ? `${t.ra}  ${t.dec}` : t.name,
+            }),
+            bar(pct),
+            el("span", { class: "small ts-pct", text: `${fmt.num(pct, 0)}%` }),
+            el("span", { class: "small ts-remaining", text, title: text }),
+            toggle,
+          ),
+          details,
+        );
+      };
+
+      const render = () => {
+        const s = feed.seqTargets;
+        if (!s) {
+          info.textContent = "Loading…";
+          return;
+        }
+        info.textContent = `Updated ${fmt.hm(s.updatedUtc)} · refreshes every 30 s`;
+        err.textContent = s.error ?? "";
+        const targets = s.targets || [];
+        if (!targets.length) {
+          summary.textContent = "";
+          list.replaceChildren(
+            el("div", {
+              class: "muted",
+              text: "No Deep Sky Object targets in the Advanced Sequence.",
+            }),
+          );
+          return;
+        }
+        const pending = targets.filter((t) => !finished(t.status)).length;
+        summary.textContent = `${s.isRunning ? "Sequence running" : "Sequence idle"} · ${targets.length} targets (${pending} to go) · ${fmt.duration(s.imagedSeconds) || "0m"} imaged · ~${fmt.duration(s.remainingSeconds) || "0m"} left${s.openEnded ? " + open-ended blocks" : ""}`;
+        const shown = targets
+          .map((t, i) => [t, i])
+          .filter(([t]) => showDone.checked || !finished(t.status));
+        list.replaceChildren(
+          ...(shown.length
+            ? shown.map(([t, i]) => targetRow(t, i))
+            : [
+                el("div", {
+                  class: "muted small",
+                  text: "All targets finished. Tick “show finished” to see them.",
+                }),
+              ]),
+        );
+      };
+      showDone.addEventListener("change", () => {
+        localStorage.setItem(
+          prefKey,
+          JSON.stringify({ done: showDone.checked }),
+        );
+        withZone(feed, render);
+      });
+      return (kind) => {
+        if (kind === "seqTargets" || kind === "all") render();
       };
     },
   },
@@ -2040,6 +2290,9 @@ function buildCard(cfg, custom) {
         section.classList.toggle("stale", !!feed.error);
         status.textContent = feed.error ? `offline: ${feed.error.message}` : "";
         if (feed.status) withZone(feed, () => update(kind, payload));
+        // Full view only: cards for features this NINA doesn't use stay hidden.
+        if (!custom && def.available && feed.status)
+          section.hidden = !def.available(feed);
       },
     }),
   );
@@ -2161,10 +2414,41 @@ function renderView() {
     view.append(...cards.map((c) => buildCard(c, true)));
   } else {
     const deviceId = currentView.slice(7);
+    const feed = feedFor(deviceById(deviceId));
+    const tabButton = (id, label) => {
+      const b = el(
+        "button",
+        { type: "button", class: `tab${deviceTab === id ? " active" : ""}` },
+        label,
+      );
+      b.addEventListener("click", () => {
+        deviceTab = id;
+        localStorage.setItem(KEYS.tab, id);
+        renderView();
+      });
+      return b;
+    };
+    const tsTab = tabButton("ts", "Target Scheduler");
+    const nav = el(
+      "nav",
+      { class: "tabs span-4" },
+      tabButton("overview", "Overview"),
+      tsTab,
+    );
+    // The tab only appears once this NINA reports a reachable Target Scheduler.
+    const syncTsTab = () => {
+      tsTab.hidden = deviceTab !== "ts" && !tsAvailable(feed);
+      nav.hidden = tsTab.hidden;
+    };
+    syncTsTab();
+    unmounts.push(feed.subscribe({ needs: [], update: syncTsTab }));
     view.append(
-      ...Object.entries(CARDS).map(([type, def]) =>
-        buildCard({ type, deviceId, span: def.span }, false),
-      ),
+      nav,
+      ...Object.entries(CARDS)
+        .filter(([, def]) => (def.tabs ?? ["overview"]).includes(deviceTab))
+        .map(([type, def]) =>
+          buildCard({ type, deviceId, span: def.span }, false),
+        ),
     );
   }
 }

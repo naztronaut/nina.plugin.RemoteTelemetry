@@ -177,7 +177,7 @@ namespace Naztronomy.NINA.RemoteTelemetry.Telemetry {
                         var ownFilter = c.Items.OfType<SwitchFilter>().FirstOrDefault()?.Filter?.Name;
                         var loop = c.Conditions?.OfType<LoopCondition>().FirstOrDefault();
                         blocks.Add(new Block {
-                            Name = item.Name,
+                            Name = NameOf(item),
                             Status = item.Status.ToString(),
                             Filter = ownFilter ?? filter,
                             ImageType = exposure.ImageType,
@@ -191,7 +191,7 @@ namespace Naztronomy.NINA.RemoteTelemetry.Telemetry {
                         // A bare Take Exposure counts its own frames; the parent's loop (if any) gives the total.
                         var parentLoop = (container as SequenceContainer)?.Conditions?.OfType<LoopCondition>().FirstOrDefault();
                         blocks.Add(new Block {
-                            Name = item.Name,
+                            Name = NameOf(item),
                             Status = item.Status.ToString(),
                             Filter = filter,
                             ImageType = single.ImageType,
@@ -207,6 +207,13 @@ namespace Naztronomy.NINA.RemoteTelemetry.Telemetry {
                 }
             }
         }
+
+        private static string NameOf(ISequenceItem item) => !string.IsNullOrWhiteSpace(item.Name) ? item.Name : item switch {
+            TakeManyExposures => "Take Many Exposures",
+            SmartExposure => "Smart Exposure",
+            TakeExposure => "Take Exposure",
+            _ => item.GetType().Name,
+        };
 
         private static string ConditionsText(SequenceContainer c) {
             var conditions = c?.Conditions;

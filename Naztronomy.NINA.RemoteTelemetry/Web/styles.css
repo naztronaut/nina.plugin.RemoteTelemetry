@@ -715,3 +715,76 @@ td.wrap {
   white-space: normal;
   min-width: 260px;
 }
+
+/* ---------- Full-view tabs ---------- */
+.tabs {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+}
+.tab {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  font-weight: 600;
+}
+.tab.active {
+  color: var(--text);
+  border-color: var(--accent);
+  box-shadow: var(--glow);
+}
+
+/* ---------- Compact progress rows ---------- */
+.bar.compact {
+  flex: 0 0 160px;
+  min-width: 80px;
+}
+.ts-summary {
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.ts-target {
+  padding: 6px 0;
+}
+.ts-target.running {
+  background: linear-gradient(90deg, #a73cf522, transparent 60%);
+}
+.ts-target-head {
+  gap: 10px;
+}
+.ts-target-head strong {
+  flex: 0 0 220px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ts-pct {
+  flex: 0 0 40px;
+  text-align: right;
+}
+.ts-target-head .ts-remaining {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ts-details {
+  margin: 6px 0 4px 12px;
+}
+.seq-icon {
+  flex: 0 0 16px;
+  text-align: center;
+  color: var(--accent);
+}
+@media (max-width: 640px) {
+  .ts-target-head {
+    flex-wrap: wrap;
+  }
+  .ts-target-head strong {
+    flex-basis: 100%;
+  }
+}
