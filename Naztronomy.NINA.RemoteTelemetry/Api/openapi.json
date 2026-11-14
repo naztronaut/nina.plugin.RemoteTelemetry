@@ -1,0 +1,967 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "NINA Remote Telemetry API",
+    "version": "1.0.0",
+    "description": "Read-only telemetry published by the Remote Telemetry plugin for N.I.N.A.\n\n- All responses are JSON with camelCase property names.\n- Timestamps are ISO-8601 UTC unless noted otherwise.\n- Values a device does not report are `null`.\n- Only GET/HEAD/OPTIONS are accepted; nothing can control NINA.\n- When an API key is configured in the plugin options, every `/api` request (except this spec) must send it.",
+    "license": {
+      "name": "MPL-2.0",
+      "url": "https://www.mozilla.org/en-US/MPL/2.0/"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://{host}:{port}",
+      "variables": {
+        "host": {
+          "default": "localhost",
+          "description": "NINA machine (LAN IP, Tailscale 100.x address or hostname)"
+        },
+        "port": { "default": "8787" }
+      }
+    }
+  ],
+  "security": [
+    {},
+    { "ApiKeyHeader": [] },
+    { "BearerAuth": [] },
+    { "ApiKeyQuery": [] }
+  ],
+  "tags": [
+    { "name": "Overview" },
+    { "name": "Equipment" },
+    { "name": "Images" },
+    { "name": "Logs" },
+    { "name": "Guiding" }
+  ],
+  "paths": {
+    "/api/v1/openapi.json": {
+      "get": {
+        "tags": ["Overview"],
+        "summary": "This OpenAPI document",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3 document",
+            "content": { "application/json": {} }
+          }
+        }
+      }
+    },
+    "/api/v1/info": {
+      "get": {
+        "tags": ["Overview"],
+        "summary": "Plugin, NINA and machine information",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Info" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/status": {
+      "get": {
+        "tags": ["Overview"],
+        "summary": "Everything a dashboard needs in one call",
+        "description": "Combines info, safety, sequence, all devices, the last saved image and an errors/warnings summary. Suitable for polling every few seconds.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/safety": {
+      "get": {
+        "tags": ["Overview"],
+        "summary": "Safety monitor state",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Safety" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/sequence": {
+      "get": {
+        "tags": ["Overview"],
+        "summary": "Advanced sequence state",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Sequence" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/devices": {
+      "get": {
+        "tags": ["Equipment"],
+        "summary": "Snapshot of every device type",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Devices" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/weather": {
+      "get": {
+        "tags": ["Equipment"],
+        "summary": "Weather device snapshot",
+        "description": "Same object as `devices.weather`.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Weather" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/images": {
+      "get": {
+        "tags": ["Images"],
+        "summary": "Recent saved frames (since NINA started), oldest first",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 300,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Image" }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/images/latest": {
+      "get": {
+        "tags": ["Images"],
+        "summary": "Metadata of the last saved frame",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Image" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/v1/images/latest/preview.jpg": {
+      "get": {
+        "tags": ["Images"],
+        "summary": "JPEG preview of the last saved frame",
+        "description": "Downscaled to the configured preview width; 16-bit mono frames are auto-stretched. Use the `key` query parameter when loading it from an `<img>` tag.",
+        "responses": {
+          "200": {
+            "description": "JPEG image",
+            "headers": {
+              "X-Image-Id": {
+                "description": "`id` of the image this preview belongs to",
+                "schema": { "type": "integer" }
+              }
+            },
+            "content": {
+              "image/jpeg": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/v1/logs": {
+      "get": {
+        "tags": ["Logs"],
+        "summary": "Tail of NINA's active log file",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2000,
+              "default": 200
+            }
+          },
+          {
+            "name": "level",
+            "in": "query",
+            "description": "Minimum level",
+            "schema": { "$ref": "#/components/schemas/LogLevel" }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Only entries with `id` greater than this. Ids restart when NINA restarts (detect via `info.pluginStartedUtc`).",
+            "schema": { "type": "integer", "format": "int64", "default": 0 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "file": {
+                      "type": "string",
+                      "description": "Log file name",
+                      "example": "20261114-201502-3.2.0.9001.1234.log"
+                    },
+                    "entries": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/LogEntry" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/issues": {
+      "get": {
+        "tags": ["Logs"],
+        "summary": "Recent WARNING, ERROR and FATAL log entries, oldest first",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/LogEntry" }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/guiding": {
+      "get": {
+        "tags": ["Guiding"],
+        "summary": "Guide steps and dithers for drawing a guide graph",
+        "description": "The plugin keeps the most recent 1200 guide steps. Poll with `after` set to the last step's `time` to receive only new steps.",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Unix time in milliseconds; only newer steps/dithers are returned",
+            "schema": { "type": "integer", "format": "int64", "default": 0 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1200,
+              "default": 600
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Guiding" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyHeader": { "type": "apiKey", "in": "header", "name": "X-Api-Key" },
+      "BearerAuth": { "type": "http", "scheme": "bearer" },
+      "ApiKeyQuery": {
+        "type": "apiKey",
+        "in": "query",
+        "name": "key",
+        "description": "Fallback for clients that cannot set headers, e.g. <img src>."
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "API key missing or wrong",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Nothing available yet",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "Missing or invalid API key."
+          }
+        }
+      },
+      "Info": {
+        "type": "object",
+        "properties": {
+          "apiVersion": { "type": "integer", "example": 1 },
+          "plugin": { "type": "string", "example": "Remote Telemetry" },
+          "pluginVersion": { "type": "string", "example": "1.0.0.0" },
+          "ninaVersion": { "type": "string", "example": "3.2.0.9001" },
+          "machineName": { "type": "string", "example": "ASTRO-PC" },
+          "profile": {
+            "type": "string",
+            "nullable": true,
+            "example": "Askar 71F"
+          },
+          "serverTimeUtc": { "type": "string", "format": "date-time" },
+          "pluginStartedUtc": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Changes when NINA restarts"
+          },
+          "location": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "latitude": { "type": "number", "nullable": true },
+              "longitude": { "type": "number", "nullable": true },
+              "elevation": {
+                "type": "number",
+                "nullable": true,
+                "description": "Metres"
+              }
+            }
+          }
+        }
+      },
+      "Status": {
+        "type": "object",
+        "properties": {
+          "info": { "$ref": "#/components/schemas/Info" },
+          "safety": { "$ref": "#/components/schemas/Safety" },
+          "sequence": { "$ref": "#/components/schemas/Sequence" },
+          "devices": { "$ref": "#/components/schemas/Devices" },
+          "lastImage": {
+            "allOf": [{ "$ref": "#/components/schemas/Image" }],
+            "nullable": true
+          },
+          "issues": {
+            "type": "object",
+            "properties": {
+              "errors": {
+                "type": "integer",
+                "description": "ERROR + FATAL lines seen since the plugin started"
+              },
+              "warnings": { "type": "integer" },
+              "recent": {
+                "type": "array",
+                "description": "Up to 10 most recent issues",
+                "items": { "$ref": "#/components/schemas/LogEntry" }
+              }
+            }
+          }
+        }
+      },
+      "Safety": {
+        "type": "object",
+        "properties": {
+          "connected": { "type": "boolean" },
+          "name": { "type": "string", "nullable": true },
+          "isSafe": { "type": "boolean", "nullable": true },
+          "state": { "type": "string", "enum": ["safe", "unsafe", "unknown"] }
+        }
+      },
+      "Sequence": {
+        "type": "object",
+        "properties": {
+          "isRunning": { "type": "boolean" },
+          "activeTarget": {
+            "type": "string",
+            "nullable": true,
+            "example": "M 31"
+          },
+          "runningItems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string", "example": "Take Many Exposures" },
+                "category": { "type": "string", "example": "Camera" }
+              }
+            }
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "status": {
+                  "type": "string",
+                  "description": "NINA sequence status",
+                  "example": "RUNNING"
+                },
+                "ra": {
+                  "type": "string",
+                  "nullable": true,
+                  "example": "00:42:44"
+                },
+                "dec": {
+                  "type": "string",
+                  "nullable": true,
+                  "example": "41° 16' 09\""
+                }
+              }
+            }
+          }
+        }
+      },
+      "DeviceBase": {
+        "type": "object",
+        "description": "Every device has these fields. Device-specific fields are only present when `connected` is true.",
+        "properties": {
+          "connected": { "type": "boolean" },
+          "name": { "type": "string", "nullable": true },
+          "driver": { "type": "string" },
+          "driverVersion": { "type": "string" },
+          "error": {
+            "type": "string",
+            "description": "Present only if reading the device failed"
+          }
+        }
+      },
+      "Devices": {
+        "type": "object",
+        "properties": {
+          "camera": { "$ref": "#/components/schemas/Camera" },
+          "mount": { "$ref": "#/components/schemas/Mount" },
+          "guider": { "$ref": "#/components/schemas/Guider" },
+          "focuser": { "$ref": "#/components/schemas/Focuser" },
+          "filterWheel": { "$ref": "#/components/schemas/FilterWheel" },
+          "rotator": { "$ref": "#/components/schemas/Rotator" },
+          "dome": { "$ref": "#/components/schemas/Dome" },
+          "flatDevice": { "$ref": "#/components/schemas/FlatDevice" },
+          "weather": { "$ref": "#/components/schemas/Weather" },
+          "safetyMonitor": { "$ref": "#/components/schemas/SafetyMonitor" },
+          "switch": { "$ref": "#/components/schemas/Switch" }
+        }
+      },
+      "Camera": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DeviceBase" },
+          {
+            "type": "object",
+            "properties": {
+              "state": { "type": "string", "example": "Exposing" },
+              "isExposing": { "type": "boolean" },
+              "exposureEndUtc": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "temperature": {
+                "type": "number",
+                "nullable": true,
+                "description": "°C"
+              },
+              "setPoint": {
+                "type": "number",
+                "nullable": true,
+                "description": "°C"
+              },
+              "coolerOn": { "type": "boolean" },
+              "coolerPower": {
+                "type": "number",
+                "nullable": true,
+                "description": "%"
+              },
+              "dewHeaterOn": { "type": "boolean", "nullable": true },
+              "battery": {
+                "type": "integer",
+                "nullable": true,
+                "description": "%"
+              },
+              "gain": { "type": "integer" },
+              "offset": { "type": "integer" },
+              "binX": { "type": "integer" },
+              "binY": { "type": "integer" },
+              "width": {
+                "type": "integer",
+                "description": "Sensor width in pixels"
+              },
+              "height": { "type": "integer" },
+              "pixelSize": {
+                "type": "number",
+                "nullable": true,
+                "description": "µm"
+              },
+              "lastDownloadSeconds": { "type": "number", "nullable": true }
+            }
+          }
+        ]
+      },
+      "Mount": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DeviceBase" },
+          {
+            "type": "object",
+            "properties": {
+              "ra": { "type": "string", "example": "00:42:44" },
+              "dec": { "type": "string", "example": "41° 16' 09\"" },
+              "raHours": { "type": "number", "nullable": true },
+              "decDegrees": { "type": "number", "nullable": true },
+              "altitude": {
+                "type": "number",
+                "nullable": true,
+                "description": "Degrees"
+              },
+              "azimuth": {
+                "type": "number",
+                "nullable": true,
+                "description": "Degrees"
+              },
+              "sideOfPier": {
+                "type": "string",
+                "enum": ["pierEast", "pierWest", "pierUnknown"]
+              },
+              "tracking": { "type": "boolean" },
+              "slewing": { "type": "boolean" },
+              "atPark": { "type": "boolean" },
+              "atHome": { "type": "boolean" },
+              "siderealTime": { "type": "string" },
+              "timeToMeridianFlipHours": { "type": "number", "nullable": true },
+              "timeToMeridianFlip": { "type": "string", "example": "02:14:30" }
+            }
+          }
+        ]
+      },
+      "Guider": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DeviceBase" },
+          {
+            "type": "object",
+            "properties": {
+              "pixelScale": {
+                "type": "number",
+                "nullable": true,
+                "description": "Arcseconds per guide-camera pixel"
+              },
+              "rms": {
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                  "totalArcsec": { "type": "number", "nullable": true },
+                  "raArcsec": { "type": "number", "nullable": true },
+                  "decArcsec": { "type": "number", "nullable": true },
+                  "peakRaArcsec": { "type": "number", "nullable": true },
+                  "peakDecArcsec": { "type": "number", "nullable": true },
+                  "totalPixels": { "type": "number", "nullable": true }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "Focuser": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DeviceBase" },
+          {
+            "type": "object",
+            "properties": {
+              "position": { "type": "integer" },
+              "temperature": {
+                "type": "number",
+                "nullable": true,
+                "description": "°C"
+              },
+              "isMoving": { "type": "boolean" },
+              "isSettling": { "type": "boolean" },
+              "tempComp": { "type": "boolean" }
+            }
+          }
+        ]
+      },
+      "FilterWheel": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DeviceBase" },
+          {
+            "type": "object",
+            "properties": {
+              "filter": { "type": "string", "nullable": true, "example": "Ha" },
+              "isMoving": { "type": "boolean" }
+            }
+          }
+        ]
+      },
+      "Rotator": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DeviceBase" },
+          {
+            "type": "object",
+            "properties": {
+              "position": {
+                "type": "number",
+                "nullable": true,
+                "description": "Sky angle, degrees"
+              },
+              "mechanicalPosition": {
+                "type": "number",
+                "nullable": true,
+                "description": "Degrees"
+              },
+              "isMoving": { "type": "boolean" }
+            }
+          }
+        ]
+      },
+      "Dome": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DeviceBase" },
+          {
+            "type": "object",
+            "properties": {
+              "shutter": { "type": "string", "example": "ShutterOpen" },
+              "azimuth": {
+                "type": "number",
+                "nullable": true,
+                "description": "Degrees"
+              },
+              "atPark": { "type": "boolean" },
+              "slewing": { "type": "boolean" },
+              "following": { "type": "boolean" }
+            }
+          }
+        ]
+      },
+      "FlatDevice": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DeviceBase" },
+          {
+            "type": "object",
+            "properties": {
+              "coverState": { "type": "string", "example": "Closed" },
+              "lightOn": { "type": "boolean" },
+              "brightness": { "type": "integer" }
+            }
+          }
+        ]
+      },
+      "Weather": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DeviceBase" },
+          {
+            "type": "object",
+            "description": "Fields the weather source does not provide are null.",
+            "properties": {
+              "temperature": {
+                "type": "number",
+                "nullable": true,
+                "description": "°C"
+              },
+              "humidity": {
+                "type": "number",
+                "nullable": true,
+                "description": "%"
+              },
+              "dewPoint": {
+                "type": "number",
+                "nullable": true,
+                "description": "°C"
+              },
+              "pressure": {
+                "type": "number",
+                "nullable": true,
+                "description": "hPa"
+              },
+              "cloudCover": {
+                "type": "number",
+                "nullable": true,
+                "description": "%"
+              },
+              "rainRate": {
+                "type": "number",
+                "nullable": true,
+                "description": "mm/h"
+              },
+              "skyBrightness": {
+                "type": "number",
+                "nullable": true,
+                "description": "lux"
+              },
+              "skyQuality": {
+                "type": "number",
+                "nullable": true,
+                "description": "mag/arcsec²"
+              },
+              "skyTemperature": {
+                "type": "number",
+                "nullable": true,
+                "description": "°C"
+              },
+              "starFwhm": {
+                "type": "number",
+                "nullable": true,
+                "description": "arcsec"
+              },
+              "windSpeed": {
+                "type": "number",
+                "nullable": true,
+                "description": "m/s"
+              },
+              "windGust": {
+                "type": "number",
+                "nullable": true,
+                "description": "m/s"
+              },
+              "windDirection": {
+                "type": "number",
+                "nullable": true,
+                "description": "Degrees"
+              }
+            }
+          }
+        ]
+      },
+      "SafetyMonitor": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DeviceBase" },
+          {
+            "type": "object",
+            "properties": { "isSafe": { "type": "boolean" } }
+          }
+        ]
+      },
+      "Switch": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DeviceBase" },
+          {
+            "type": "object",
+            "properties": {
+              "switches": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "integer" },
+                    "name": { "type": "string" },
+                    "value": { "type": "number", "nullable": true },
+                    "writable": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "Image": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Increments per saved frame; restarts with NINA"
+          },
+          "timestampUtc": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Exposure start"
+          },
+          "fileName": {
+            "type": "string",
+            "nullable": true,
+            "example": "M31_LIGHT_Ha_300s_0042.fits"
+          },
+          "imageType": {
+            "type": "string",
+            "nullable": true,
+            "example": "LIGHT"
+          },
+          "target": { "type": "string", "nullable": true },
+          "ra": { "type": "string", "nullable": true },
+          "dec": { "type": "string", "nullable": true },
+          "filter": { "type": "string", "nullable": true },
+          "exposureSeconds": { "type": "number", "nullable": true },
+          "binning": { "type": "string", "nullable": true, "example": "1x1" },
+          "width": { "type": "integer", "nullable": true },
+          "height": { "type": "integer", "nullable": true },
+          "hfr": {
+            "type": "number",
+            "nullable": true,
+            "description": "Null when star detection did not run or found no stars"
+          },
+          "hfrStDev": { "type": "number", "nullable": true },
+          "stars": { "type": "integer", "nullable": true },
+          "mean": { "type": "number", "nullable": true },
+          "median": { "type": "number", "nullable": true },
+          "stDev": { "type": "number", "nullable": true },
+          "mad": { "type": "number", "nullable": true },
+          "min": { "type": "integer", "nullable": true },
+          "max": { "type": "integer", "nullable": true },
+          "cameraTemperature": {
+            "type": "number",
+            "nullable": true,
+            "description": "°C"
+          },
+          "gain": { "type": "integer", "nullable": true },
+          "offset": { "type": "integer", "nullable": true },
+          "hasPreview": {
+            "type": "boolean",
+            "description": "True once preview.jpg is available for this image"
+          }
+        }
+      },
+      "LogLevel": {
+        "type": "string",
+        "enum": ["Trace", "Debug", "Info", "Warning", "Error", "Fatal"],
+        "default": "Info"
+      },
+      "LogEntry": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "level": { "$ref": "#/components/schemas/LogLevel" },
+          "source": { "type": "string", "example": "GuiderVM.cs" },
+          "member": { "type": "string" },
+          "message": {
+            "type": "string",
+            "description": "May span multiple lines (e.g. stack traces)"
+          }
+        }
+      },
+      "Guiding": {
+        "type": "object",
+        "properties": {
+          "isGuiding": { "type": "boolean" },
+          "pixelScale": {
+            "type": "number",
+            "nullable": true,
+            "description": "Arcsec per pixel; null when unknown, in which case `ra`/`dec` are null"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "time": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Unix time in milliseconds"
+                },
+                "raPx": {
+                  "type": "number",
+                  "description": "RA error in guide-camera pixels"
+                },
+                "decPx": { "type": "number" },
+                "ra": {
+                  "type": "number",
+                  "nullable": true,
+                  "description": "RA error in arcseconds"
+                },
+                "dec": { "type": "number", "nullable": true },
+                "raPulseMs": {
+                  "type": "number",
+                  "description": "RA correction pulse duration (signed)"
+                },
+                "decPulseMs": { "type": "number" }
+              }
+            }
+          },
+          "dithers": {
+            "type": "array",
+            "description": "Unix ms timestamps of completed dithers",
+            "items": { "type": "integer", "format": "int64" }
+          }
+        }
+      }
+    }
+  }
+}

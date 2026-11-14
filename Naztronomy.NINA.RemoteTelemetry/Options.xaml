@@ -1,0 +1,85 @@
+<!--
+    Copyright (c) 2026 Naztronomy
+
+    This Source Code Form is subject to the terms of the Mozilla Public
+    License, v. 2.0. If a copy of the MPL was not distributed with this
+    file, You can obtain one at http://mozilla.org/MPL/2.0/
+-->
+<ResourceDictionary
+    x:Class="Naztronomy.NINA.RemoteTelemetry.Options"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <DataTemplate x:Key="Remote Telemetry_Options">
+        <StackPanel Orientation="Vertical" Margin="10">
+
+            <TextBlock Margin="0,0,0,5" FontWeight="Bold" Text="Telemetry server" />
+            <TextBlock
+                Margin="0,0,0,10"
+                TextWrapping="Wrap"
+                Text="Serves a read-only JSON API and a dashboard from this NINA instance. Intended for a private network such as Tailscale. Do not port-forward it to the internet." />
+
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                <CheckBox VerticalAlignment="Center" IsChecked="{Binding ServerEnabled}" />
+                <TextBlock VerticalAlignment="Center" Margin="10,0,0,0" FontWeight="Bold" Text="Server enabled" />
+            </StackPanel>
+
+            <TextBlock
+                Margin="0,0,0,10"
+                FontStyle="Italic"
+                TextWrapping="Wrap"
+                Text="{Binding ServerStatus, StringFormat='Status: {0}'}" />
+
+            <TextBlock Margin="0,5,0,2" Text="Port" />
+            <TextBox
+                MinWidth="120"
+                HorizontalAlignment="Left"
+                ToolTip="TCP port (1024-65535). Windows Firewall may ask to allow NINA the first time."
+                Text="{Binding ServerPort, UpdateSourceTrigger=LostFocus}" />
+
+            <TextBlock Margin="0,10,0,2" Text="API key (optional)" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                <TextBox
+                    MinWidth="320"
+                    VerticalAlignment="Center"
+                    ToolTip="When set, API requests must send this key (X-Api-Key header or ?key=). Leave blank to allow anyone on the network."
+                    Text="{Binding ApiKey, UpdateSourceTrigger=LostFocus}" />
+                <Button
+                    Margin="6,0,0,0"
+                    Padding="10,3"
+                    VerticalAlignment="Center"
+                    Content="Generate"
+                    Command="{Binding GenerateApiKeyCommand}" />
+            </StackPanel>
+
+            <TextBlock Margin="0,10,0,2" Text="Allowed origins (CORS)" />
+            <TextBox
+                MinWidth="320"
+                HorizontalAlignment="Left"
+                ToolTip="Web pages allowed to call the API from a browser. Use * for any, or a comma-separated list such as http://100.101.102.103:8787"
+                Text="{Binding AllowedOrigins, UpdateSourceTrigger=LostFocus}" />
+
+            <TextBlock Margin="0,10,0,2" Text="Preview max width (px)" />
+            <TextBox
+                MinWidth="120"
+                HorizontalAlignment="Left"
+                ToolTip="Width of the JPEG preview of the last saved frame."
+                Text="{Binding PreviewMaxWidth, UpdateSourceTrigger=LostFocus}" />
+
+            <StackPanel Orientation="Horizontal" Margin="0,15,0,0">
+                <Button Padding="10,3" Content="Restart server" Command="{Binding RestartServerCommand}" />
+                <Button Margin="6,0,0,0" Padding="10,3" Content="Open dashboard" Command="{Binding OpenDashboardCommand}" />
+            </StackPanel>
+
+            <TextBlock Margin="0,18,0,5" FontWeight="Bold" Text="Reachable at" />
+            <ItemsControl ItemsSource="{Binding DashboardUrls}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <TextBox IsReadOnly="True" BorderThickness="0" Background="Transparent" Text="{Binding Mode=OneWay}" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+        </StackPanel>
+    </DataTemplate>
+</ResourceDictionary>

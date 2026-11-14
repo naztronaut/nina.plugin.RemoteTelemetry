@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NINA Remote Telemetry</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="favicon.svg" alt="" width="24" height="24" />
+        <span>Remote Telemetry</span>
+      </div>
+      <select id="viewSelect" aria-label="View"></select>
+      <nav id="deviceChips" class="chips" aria-label="NINA devices"></nav>
+      <div class="actions">
+        <button id="addCardBtn" type="button" class="primary" hidden>
+          Add card
+        </button>
+        <button id="editBtn" type="button" hidden>Edit layout</button>
+        <button id="nightBtn" type="button" title="Toggle red night mode">
+          Night
+        </button>
+        <button id="manageBtn" type="button">Devices</button>
+      </div>
+    </header>
+
+    <main id="empty" class="empty" hidden>
+      <h1>No NINA devices yet</h1>
+      <p>
+        Add a NINA instance running the Remote Telemetry plugin, e.g.
+        <code>http://100.64.0.12:8787</code> or
+        <code>http://astro-pc:8787</code>.
+      </p>
+      <button id="emptyAddBtn" type="button" class="primary">Add device</button>
+    </main>
+
+    <main id="view" class="grid"></main>
+
+    <dialog id="devicesDialog">
+      <form method="dialog" class="dialog">
+        <h2>NINA devices</h2>
+        <ul id="deviceList" class="devicelist"></ul>
+        <fieldset>
+          <legend>Add device</legend>
+          <label
+            >Name <input id="newName" placeholder="Observatory" maxlength="60"
+          /></label>
+          <label
+            >Address <input id="newUrl" placeholder="http://100.64.0.12:8787"
+          /></label>
+          <label
+            >API key
+            <input id="newKey" placeholder="(optional)" autocomplete="off"
+          /></label>
+          <p id="addError" class="error" hidden></p>
+          <button id="addBtn" type="button" class="primary">
+            Test &amp; add
+          </button>
+        </fieldset>
+        <div class="right">
+          <button value="close" formnovalidate>Close</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="cardDialog">
+      <form method="dialog" class="dialog">
+        <h2>Add card</h2>
+        <label class="field"
+          >Card
+          <select id="cardType"></select
+        ></label>
+        <label class="field"
+          >From NINA
+          <select id="cardDevice"></select
+        ></label>
+        <div class="right">
+          <button value="cancel" formnovalidate>Cancel</button>
+          <button id="cardAddBtn" type="button" class="primary">Add</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>

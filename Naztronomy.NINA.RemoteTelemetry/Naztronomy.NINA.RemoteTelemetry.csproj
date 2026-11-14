@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows7.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <RootNamespace>Naztronomy.NINA.RemoteTelemetry</RootNamespace>
+    <AssemblyName>Naztronomy.NINA.RemoteTelemetry</AssemblyName>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <UseWPF>true</UseWPF>
+    <ImportWindowsDesktopTargets>true</ImportWindowsDesktopTargets>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <Platforms>AnyCPU</Platforms>
+    <Configurations>Debug;Release</Configurations>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NINA.Plugin" Version="3.2.0.9001" />
+  </ItemGroup>
+
+  <!-- The dashboard is compiled into the DLL so every NINA instance can serve it at "/". -->
+  <ItemGroup>
+    <EmbeddedResource Include="Web\*" LogicalName="web/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Api\openapi.json" LogicalName="api/openapi.json" />
+  </ItemGroup>
+
+  <!--
+    Copies the built plugin into NINA's plugin folder after each build so it is
+    picked up the next time NINA starts. Only runs when NINA's local data folder
+    exists, and never fails the build if the copy cannot be completed.
+  -->
+  <Target Name="DeployToNina" AfterTargets="PostBuildEvent" Condition="Exists('$(LOCALAPPDATA)\NINA')">
+    <PropertyGroup>
+      <PluginDeployDir>$(LOCALAPPDATA)\NINA\Plugins\3.0.0\$(MSBuildProjectName)</PluginDeployDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(PluginDeployDir)" />
+    <Copy SourceFiles="$(TargetPath);$(TargetDir)$(TargetName).pdb"
+          DestinationFolder="$(PluginDeployDir)"
+          SkipUnchangedFiles="false"
+          ContinueOnError="true" />
+  </Target>
+
+  <!-- Builds the distributable .zip + NINA manifest.json via Package-Plugin.ps1. Run: dotnet msbuild -t:PackagePlugin -->
+  <Target Name="PackagePlugin">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\Package-Plugin.ps1&quot; -Configuration $(Configuration)" />
+  </Target>
+
+</Project>
