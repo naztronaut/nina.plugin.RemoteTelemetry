@@ -71,6 +71,27 @@
                 <Button Margin="6,0,0,0" Padding="10,3" Content="Open dashboard" Command="{Binding OpenDashboardCommand}" />
             </StackPanel>
 
+            <TextBlock Margin="0,18,0,5" FontWeight="Bold" Text="Target Scheduler" />
+            <TextBlock
+                Margin="0,0,0,8"
+                TextWrapping="Wrap"
+                Text="Adds the Scheduler cards (now, tonight's plan, project progress). Requires 'Enable API' in Target Scheduler's profile preferences. Its API is only called on this machine and is re-served through this plugin (with your API key)." />
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                <CheckBox VerticalAlignment="Center" IsChecked="{Binding TargetSchedulerEnabled}" />
+                <TextBlock VerticalAlignment="Center" Margin="10,0,0,0" Text="Target Scheduler integration enabled" />
+            </StackPanel>
+            <TextBlock Margin="0,6,0,2" Text="Target Scheduler API port" />
+            <TextBox
+                MinWidth="120"
+                HorizontalAlignment="Left"
+                ToolTip="Must match the API port in Target Scheduler's profile preferences (default 8188)."
+                Text="{Binding TargetSchedulerPort, UpdateSourceTrigger=LostFocus}" />
+            <TextBlock
+                Margin="0,6,0,0"
+                FontStyle="Italic"
+                TextWrapping="Wrap"
+                Text="{Binding TargetSchedulerStatus, StringFormat='Status: {0}'}" />
+
             <TextBlock Margin="0,18,0,5" FontWeight="Bold" Text="Reachable at" />
             <ItemsControl ItemsSource="{Binding DashboardUrls}">
                 <ItemsControl.ItemTemplate>

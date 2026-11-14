@@ -567,3 +567,146 @@ fieldset label {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ---------- Target Scheduler ---------- */
+
+.ts-headline {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 2px 0;
+}
+.ts-foot {
+  margin-top: 8px;
+}
+
+.ts-timeline {
+  margin: 6px 0 12px;
+}
+.ts-track {
+  position: relative;
+  height: 34px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.ts-bar {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 26px;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-right: 2px solid var(--card);
+}
+.ts-bar.c0 {
+  background: #7b2fd0;
+}
+.ts-bar.c1 {
+  background: #a73cf5;
+}
+.ts-bar.c2 {
+  background: #c03ad8;
+}
+.ts-bar.c3 {
+  background: #5b3bd6;
+}
+.ts-bar.wait {
+  background: repeating-linear-gradient(
+    45deg,
+    #2a2440,
+    #2a2440 6px,
+    #221d33 6px,
+    #221d33 12px
+  );
+}
+.ts-now {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--warn);
+  box-shadow: 0 0 6px var(--warn);
+}
+.ts-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.bar {
+  flex: 1;
+  min-width: 80px;
+  height: 8px;
+  background: var(--surface-2);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+.bar-cell {
+  width: 30%;
+}
+.bar-cell .bar {
+  min-width: 60px;
+}
+
+.ts-projects {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ts-project {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.ts-project > header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.ts-target {
+  border-top: 1px solid var(--border);
+  padding: 8px 0 4px;
+}
+.ts-target.off {
+  opacity: 0.55;
+}
+.ts-target-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ts-target-head strong {
+  min-width: 120px;
+}
+.ts-remaining {
+  color: #e3c6ff;
+  margin: 4px 0;
+}
+.ts-filters td,
+.ts-filters th {
+  padding: 3px 8px;
+}
+.ts-stats {
+  margin-top: 6px;
+  padding: 6px;
+  background: var(--surface);
+  border-radius: 6px;
+}
+.small-btn {
+  padding: 1px 8px;
+  font-size: 12px;
+}

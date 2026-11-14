@@ -50,6 +50,7 @@ namespace Naztronomy.NINA.RemoteTelemetry {
         private readonly LogTracker logTracker;
         private readonly ImageTracker imageTracker;
         private readonly GuideTracker guideTracker;
+        private readonly TargetSchedulerTracker schedulerTracker;
         private readonly TelemetryApi api;
         private MiniHttpServer server;
         private string serverStatus = "Stopped";
@@ -69,13 +70,16 @@ namespace Naztronomy.NINA.RemoteTelemetry {
             ISafetyMonitorMediator safetyMonitorMediator,
             IDomeMediator domeMediator,
             IFlatDeviceMediator flatDeviceMediator,
-            ISwitchMediator switchMediator) {
+            ISwitchMediator switchMediator,
+            IMessageBroker messageBroker) {
             this.profileService = profileService;
             settings = new PluginOptionsAccessor(profileService, Guid.Parse(Identifier));
 
             logTracker = new LogTracker();
             imageTracker = new ImageTracker(imageSaveMediator, () => PreviewMaxWidth);
             guideTracker = new GuideTracker(guiderMediator);
+            schedulerTracker = new TargetSchedulerTracker(messageBroker, profileService, imageSaveMediator, () => TargetSchedulerEnabled, () => TargetSchedulerPort);
+            schedulerTracker.StatusChanged += (_, _) => RaisePropertyChanged(nameof(TargetSchedulerStatus));
 
             var collector = new TelemetryCollector(new TelemetrySources {
                 Profile = profileService,
@@ -91,9 +95,9 @@ namespace Naztronomy.NINA.RemoteTelemetry {
                 Dome = domeMediator,
                 FlatDevice = flatDeviceMediator,
                 Switch = switchMediator,
-            }, imageTracker, logTracker);
+            }, imageTracker, logTracker, schedulerTracker.GetNow);
 
-            api = new TelemetryApi(collector, imageTracker, logTracker, guideTracker, () => GuiderPixelScale(guiderMediator), () => ApiKey, () => AllowedOrigins);
+            api = new TelemetryApi(collector, imageTracker, logTracker, guideTracker, schedulerTracker, () => GuiderPixelScale(guiderMediator), () => ApiKey, () => AllowedOrigins);
 
             RestartServerCommand = new RelayCommand(RestartServer);
             GenerateApiKeyCommand = new RelayCommand(() => ApiKey = NewApiKey());
@@ -102,6 +106,7 @@ namespace Naztronomy.NINA.RemoteTelemetry {
             profileService.ProfileChanged += ProfileService_ProfileChanged;
 
             logTracker.Start();
+            schedulerTracker.Start();
             RestartServer();
         }
 
@@ -110,6 +115,7 @@ namespace Naztronomy.NINA.RemoteTelemetry {
             StopServer();
             imageTracker.Dispose();
             guideTracker.Dispose();
+            schedulerTracker.Dispose();
             logTracker.Dispose();
             return base.Teardown();
         }
@@ -120,6 +126,9 @@ namespace Naztronomy.NINA.RemoteTelemetry {
             RaisePropertyChanged(nameof(ApiKey));
             RaisePropertyChanged(nameof(AllowedOrigins));
             RaisePropertyChanged(nameof(PreviewMaxWidth));
+            RaisePropertyChanged(nameof(TargetSchedulerEnabled));
+            RaisePropertyChanged(nameof(TargetSchedulerPort));
+            RaisePropertyChanged(nameof(TargetSchedulerStatus));
             RestartServer();
         }
 
@@ -135,6 +144,30 @@ namespace Naztronomy.NINA.RemoteTelemetry {
                 RestartServer();
             }
         }
+
+        public bool TargetSchedulerEnabled {
+            get => settings.GetValueBoolean(nameof(TargetSchedulerEnabled), true);
+            set {
+                settings.SetValueBoolean(nameof(TargetSchedulerEnabled), value);
+                RaisePropertyChanged();
+                RaisePropertyChanged(nameof(TargetSchedulerStatus));
+            }
+        }
+
+        /// <summary>Port of Target Scheduler's local API (TS profile preferences, default 8188).</summary>
+        public int TargetSchedulerPort {
+            get => settings.GetValueInt32(nameof(TargetSchedulerPort), 8188);
+            set {
+                if (value < 1 || value > 65535) {
+                    RaisePropertyChanged();
+                    return;
+                }
+                settings.SetValueInt32(nameof(TargetSchedulerPort), value);
+                RaisePropertyChanged();
+            }
+        }
+
+        public string TargetSchedulerStatus => schedulerTracker?.StatusText ?? string.Empty;
 
         public int ServerPort {
             get => settings.GetValueInt32(nameof(ServerPort), DefaultPort);

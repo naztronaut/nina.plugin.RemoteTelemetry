@@ -47,27 +47,29 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
         private readonly ImageTracker images;
         private readonly LogTracker logs;
         private readonly GuideTracker guiding;
+        private readonly TargetSchedulerTracker scheduler;
         private readonly Func<double?> guiderPixelScale;
         private readonly Func<string> apiKey;
         private readonly Func<string> allowedOrigins;
 
-        public TelemetryApi(TelemetryCollector collector, ImageTracker images, LogTracker logs, GuideTracker guiding, Func<double?> guiderPixelScale, Func<string> apiKey, Func<string> allowedOrigins) {
+        public TelemetryApi(TelemetryCollector collector, ImageTracker images, LogTracker logs, GuideTracker guiding, TargetSchedulerTracker scheduler, Func<double?> guiderPixelScale, Func<string> apiKey, Func<string> allowedOrigins) {
             this.collector = collector;
             this.images = images;
             this.logs = logs;
             this.guiding = guiding;
+            this.scheduler = scheduler;
             this.guiderPixelScale = guiderPixelScale;
             this.apiKey = apiKey;
             this.allowedOrigins = allowedOrigins;
         }
 
-        public Task<HttpResponse> HandleAsync(HttpRequest req) {
-            var response = Route(req);
+        public async Task<HttpResponse> HandleAsync(HttpRequest req) {
+            var response = await RouteAsync(req).ConfigureAwait(false);
             ApplyCors(req, response);
-            return Task.FromResult(response);
+            return response;
         }
 
-        private HttpResponse Route(HttpRequest req) {
+        private async Task<HttpResponse> RouteAsync(HttpRequest req) {
             if (req.Method == "OPTIONS") {
                 var preflight = new HttpResponse { Status = 204 };
                 if (req.Header("Access-Control-Request-Private-Network") == "true") {
@@ -76,13 +78,15 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
                 return preflight;
             }
 
-            if (req.Method != "GET" && req.Method != "HEAD") {
-                return Error(405, "Only GET is supported.");
-            }
-
             var path = req.Path.TrimEnd('/');
             if (path.Length == 0) {
                 path = "/";
+            }
+
+            // The only non-GET call: re-running the TS plan preview changes nothing in NINA.
+            var isPlanRefresh = path.Equals("/api/v1/scheduler/plan/refresh", StringComparison.OrdinalIgnoreCase);
+            if (isPlanRefresh ? req.Method != "POST" : req.Method != "GET" && req.Method != "HEAD") {
+                return Error(405, isPlanRefresh ? "Use POST." : "Only GET is supported.");
             }
 
             if (StaticFiles.TryGetValue(path, out var file)) {
@@ -153,9 +157,37 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
                     long.TryParse(req.QueryValue("after"), out var afterMs);
                     return Json(guiding.Get(afterMs, req.QueryInt("limit", 600, 1, 1200), guiderPixelScale()));
 
-                default:
-                    return Error(404, "Unknown endpoint.");
+                case "/api/v1/scheduler":
+                    return Json(scheduler.GetNow());
+
+                case "/api/v1/scheduler/plan":
+                    return Json(scheduler.GetPlan());
+
+                case "/api/v1/scheduler/plan/refresh":
+                    using (var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(90))) {
+                        return Json(await scheduler.RefreshPlanAsync(cts.Token, manual: true).ConfigureAwait(false));
+                    }
+
+                case "/api/v1/scheduler/progress":
+                    return Json(scheduler.GetProgress());
             }
+
+            const string statsPrefix = "/api/v1/scheduler/targets/";
+            if (path.StartsWith(statsPrefix, StringComparison.OrdinalIgnoreCase) && path.EndsWith("/statistics", StringComparison.OrdinalIgnoreCase)) {
+                // Only a parsed GUID is ever forwarded to the TS API.
+                var idText = path.Substring(statsPrefix.Length, path.Length - statsPrefix.Length - "/statistics".Length);
+                if (!Guid.TryParse(idText, out var targetId)) {
+                    return Error(400, "Target id must be a GUID.");
+                }
+                try {
+                    using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(30));
+                    return Json(await scheduler.GetStatisticsAsync(targetId, cts.Token).ConfigureAwait(false));
+                } catch (Exception ex) when (ex is System.Net.Http.HttpRequestException || ex is InvalidOperationException || ex is TaskCanceledException || ex is JsonException) {
+                    return Error(503, $"Target Scheduler API not available: {ex.Message}");
+                }
+            }
+
+            return Error(404, "Unknown endpoint.");
         }
 
         private bool IsAuthorized(HttpRequest req) {
@@ -192,7 +224,7 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
                 res.Headers["Vary"] = "Origin";
             }
 
-            res.Headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS";
+            res.Headers["Access-Control-Allow-Methods"] = "GET, HEAD, POST, OPTIONS";
             res.Headers["Access-Control-Allow-Headers"] = "X-Api-Key, Authorization";
             res.Headers["Access-Control-Expose-Headers"] = "X-Image-Id";
             res.Headers["Access-Control-Max-Age"] = "600";

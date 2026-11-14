@@ -32,7 +32,11 @@
     { "name": "Equipment" },
     { "name": "Images" },
     { "name": "Logs" },
-    { "name": "Guiding" }
+    { "name": "Guiding" },
+    {
+      "name": "Target Scheduler",
+      "description": "Requires the Target Scheduler plugin with its API enabled. Data is read from TS on the NINA machine and cached by this plugin."
+    }
   ],
   "paths": {
     "/api/v1/openapi.json": {
@@ -348,6 +352,142 @@
           "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
+    },
+    "/api/v1/scheduler": {
+      "get": {
+        "tags": ["Target Scheduler"],
+        "summary": "What Target Scheduler is doing right now",
+        "description": "Built from Target Scheduler's plugin messages (target start, wait start, target complete, container stopped). Also included in `/api/v1/status` as `scheduler`.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SchedulerNow" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/scheduler/plan": {
+      "get": {
+        "tags": ["Target Scheduler"],
+        "summary": "Tonight's plan (cached Target Scheduler preview)",
+        "description": "Refreshed automatically once an hour. Use POST /api/v1/scheduler/plan/refresh to re-run it now.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SchedulerPlan" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/scheduler/plan/refresh": {
+      "post": {
+        "tags": ["Target Scheduler"],
+        "summary": "Re-run the Target Scheduler preview now",
+        "description": "The only non-GET endpoint. It recomputes the preview and changes nothing in NINA or Target Scheduler. Calls within `manualRefreshCooldownSeconds` of the last refresh return the cached plan. Can take several seconds.",
+        "responses": {
+          "200": {
+            "description": "The refreshed plan",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SchedulerPlan" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/scheduler/progress": {
+      "get": {
+        "tags": ["Target Scheduler"],
+        "summary": "Project and target progress, with remaining exposures per filter",
+        "description": "Cached; refreshed every 2 minutes and shortly after each saved image. Closed projects are omitted.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SchedulerProgress" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/scheduler/targets/{id}/statistics": {
+      "get": {
+        "tags": ["Target Scheduler"],
+        "summary": "Image quality statistics for a target, per filter",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Target id from `/api/v1/scheduler/progress`",
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK (cached for 5 minutes)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "description": "Values are null until graded frames exist.",
+                    "properties": {
+                      "filter": { "type": "string" },
+                      "exposureSeconds": { "type": "number", "nullable": true },
+                      "hfrMean": { "type": "number", "nullable": true },
+                      "hfrStDev": { "type": "number", "nullable": true },
+                      "fwhmMean": { "type": "number", "nullable": true },
+                      "fwhmStDev": { "type": "number", "nullable": true },
+                      "eccentricityMean": {
+                        "type": "number",
+                        "nullable": true
+                      },
+                      "eccentricityStDev": {
+                        "type": "number",
+                        "nullable": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Id is not a GUID",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": {
+            "description": "Target Scheduler API not reachable",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -448,7 +588,8 @@
                 "items": { "$ref": "#/components/schemas/LogEntry" }
               }
             }
-          }
+          },
+          "scheduler": { "$ref": "#/components/schemas/SchedulerNow" }
         }
       },
       "Safety": {
@@ -961,6 +1102,218 @@
             "items": { "type": "integer", "format": "int64" }
           }
         }
+      },
+      "SchedulerApiState": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Integration switch in the plugin options"
+          },
+          "apiReachable": { "type": "boolean" },
+          "apiError": { "type": "string", "nullable": true }
+        }
+      },
+      "SchedulerNow": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SchedulerApiState" },
+          {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string",
+                "nullable": true,
+                "example": "5.9.0.0"
+              },
+              "state": {
+                "type": "string",
+                "enum": ["imaging", "waiting", "stopped", "unknown"],
+                "description": "`unknown` until TS sends its first message after NINA starts"
+              },
+              "project": { "type": "string", "nullable": true },
+              "target": {
+                "type": "string",
+                "nullable": true,
+                "description": "Current target, or the next target while waiting"
+              },
+              "ra": { "type": "string", "nullable": true },
+              "dec": { "type": "string", "nullable": true },
+              "rotation": { "type": "number", "nullable": true },
+              "filter": { "type": "string", "nullable": true },
+              "exposureSeconds": { "type": "number", "nullable": true },
+              "gain": {
+                "type": "string",
+                "nullable": true,
+                "example": "(camera)"
+              },
+              "offset": { "type": "string", "nullable": true },
+              "binning": { "type": "string", "nullable": true },
+              "sinceUtc": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "targetEndsUtc": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true,
+                "description": "When the target stops being visible"
+              },
+              "waitUntilUtc": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "stoppedAtUtc": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "lastCompleted": {
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                  "target": { "type": "string" },
+                  "project": { "type": "string", "nullable": true },
+                  "atUtc": { "type": "string", "format": "date-time" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "SchedulerPlan": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SchedulerApiState" },
+          {
+            "type": "object",
+            "properties": {
+              "updatedUtc": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true,
+                "description": "Null until the first preview has run"
+              },
+              "nextAutoRefreshUtc": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "manualRefreshCooldownSeconds": { "type": "integer" },
+              "items": {
+                "type": "array",
+                "nullable": true,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "targetId": { "type": "string", "nullable": true },
+                    "name": { "type": "string", "nullable": true },
+                    "project": { "type": "string", "nullable": true },
+                    "waitPeriod": { "type": "boolean" },
+                    "startUtc": { "type": "string", "format": "date-time" },
+                    "endUtc": { "type": "string", "format": "date-time" },
+                    "exposures": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "filter": { "type": "string" },
+                          "exposureSeconds": {
+                            "type": "number",
+                            "nullable": true
+                          },
+                          "count": { "type": "integer" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "SchedulerProgress": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SchedulerApiState" },
+          {
+            "type": "object",
+            "properties": {
+              "updatedUtc": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "projects": {
+                "type": "array",
+                "nullable": true,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": "string" },
+                    "state": { "type": "string", "example": "Active" },
+                    "priority": { "type": "integer" },
+                    "gradingEnabled": { "type": "boolean" },
+                    "percentComplete": {
+                      "type": "number",
+                      "nullable": true,
+                      "description": "Over active targets only; null when nothing is planned"
+                    },
+                    "remainingSeconds": {
+                      "type": "number",
+                      "description": "Exposure time still needed (active targets only)"
+                    },
+                    "targets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "name": { "type": "string" },
+                          "active": { "type": "boolean" },
+                          "raHours": { "type": "number", "nullable": true },
+                          "decDegrees": { "type": "number", "nullable": true },
+                          "percentComplete": {
+                            "type": "number",
+                            "nullable": true
+                          },
+                          "remainingSeconds": { "type": "number" },
+                          "filters": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "template": { "type": "string" },
+                                "filter": { "type": "string" },
+                                "exposureSeconds": {
+                                  "type": "number",
+                                  "nullable": true
+                                },
+                                "desired": { "type": "integer" },
+                                "acquired": { "type": "integer" },
+                                "accepted": { "type": "integer" },
+                                "ungraded": { "type": "integer" },
+                                "remaining": {
+                                  "type": "integer",
+                                  "description": "desired − accepted (never negative)"
+                                },
+                                "remainingSeconds": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
       }
     }
   }

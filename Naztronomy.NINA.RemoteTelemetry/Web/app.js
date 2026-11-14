@@ -33,6 +33,24 @@ const fmt = {
   num: (v, d = 1, unit = "") =>
     v == null ? null : `${Number(v).toFixed(d)}${unit}`,
   time: (iso) => (iso ? new Date(iso).toLocaleTimeString() : null),
+  hm: (iso) =>
+    iso
+      ? new Date(iso).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : null,
+  duration(seconds) {
+    if (seconds == null) return null;
+    const m = Math.round(seconds / 60);
+    if (m < 60) return `${m}m`;
+    return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+  },
+  until(iso) {
+    if (!iso) return null;
+    const s = Math.round((new Date(iso).getTime() - Date.now()) / 1000);
+    return s <= 0 ? "now" : `in ${fmt.duration(s)}`;
+  },
   ago(iso) {
     if (!iso) return null;
     const s = Math.max(
@@ -97,12 +115,13 @@ const deviceById = (id) => devices.find((d) => d.id === id);
 
 // ---------- API ----------
 
-async function api(dev, path, timeoutMs = 8000) {
+async function api(dev, path, timeoutMs = 8000, method = "GET") {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const headers = dev.key ? { "X-Api-Key": dev.key } : {};
     const res = await fetch(dev.url + path, {
+      method,
       headers,
       signal: ctrl.signal,
       cache: "no-store",
@@ -135,6 +154,8 @@ function previewUrl(dev, imageId) {
 const STATUS_MS = 5000;
 const LOG_MS = 5000;
 const GUIDE_MS = 2000;
+const PLAN_MS = 5 * 60 * 1000;
+const PROGRESS_MS = 60 * 1000;
 const MAX_LOGS = 1000;
 const MAX_GUIDE_STEPS = 1200;
 const feeds = new Map();
@@ -154,6 +175,8 @@ class Feed {
     this.lastGuideTime = 0;
     this.guideScale = null;
     this.isGuiding = false;
+    this.plan = null;
+    this.progress = null;
     this.lastImageId = undefined;
     this.lastIssueId = undefined;
     this.startedUtc = null;
@@ -167,6 +190,8 @@ class Feed {
     } else {
       if (sub.needs.includes("history")) this.fetchHistory();
       if (sub.needs.includes("issues")) this.fetchIssues();
+      if (sub.needs.includes("plan")) this.fetchPlan();
+      if (sub.needs.includes("progress")) this.fetchProgress();
     }
     return () => {
       this.subs.delete(sub);
@@ -185,15 +210,22 @@ class Feed {
     this.poll();
     this.pollLogs();
     this.pollGuiding();
+    this.fetchPlan();
+    this.fetchProgress();
     this.statusTimer = setInterval(() => this.poll(), STATUS_MS);
     this.logTimer = setInterval(() => this.pollLogs(), LOG_MS);
     this.guideTimer = setInterval(() => this.pollGuiding(), GUIDE_MS);
+    this.planTimer = setInterval(() => this.fetchPlan(), PLAN_MS);
+    this.progressTimer = setInterval(() => this.fetchProgress(), PROGRESS_MS);
   }
 
   stop() {
     clearInterval(this.statusTimer);
     clearInterval(this.logTimer);
     clearInterval(this.guideTimer);
+    clearInterval(this.planTimer);
+    clearInterval(this.progressTimer);
+    clearTimeout(this.planRetry);
   }
 
   emit(kind, payload) {
@@ -279,6 +311,40 @@ class Feed {
       const newDithers = res.dithers.filter((d) => d > lastDither);
       this.dithers.push(...newDithers);
       if (changed || newDithers.length) this.emit("guiding");
+    } catch {
+      /* surfaced by status poll */
+    }
+  }
+
+  async fetchPlan() {
+    if (!this.needs("plan")) return;
+    try {
+      this.plan = await api(this.dev, "/api/v1/scheduler/plan");
+      this.emit("plan");
+      // The plugin computes the first plan in the background; check back soon.
+      clearTimeout(this.planRetry);
+      if (this.plan.enabled && !this.plan.updatedUtc)
+        this.planRetry = setTimeout(() => this.fetchPlan(), 15000);
+    } catch {
+      /* surfaced by status poll */
+    }
+  }
+
+  async refreshPlan() {
+    this.plan = await api(
+      this.dev,
+      "/api/v1/scheduler/plan/refresh",
+      95000,
+      "POST",
+    );
+    this.emit("plan");
+  }
+
+  async fetchProgress() {
+    if (!this.needs("progress")) return;
+    try {
+      this.progress = await api(this.dev, "/api/v1/scheduler/progress");
+      this.emit("progress");
     } catch {
       /* surfaced by status poll */
     }
@@ -537,11 +603,22 @@ const CARDS = {
           cam?.connected && cam.isExposing && cam.exposureEndUtc
             ? `Exposing — ${Math.max(0, Math.round((new Date(cam.exposureEndUtc) - Date.now()) / 1000))}s left`
             : null;
+        const ts = feed.status.scheduler;
+        const tsTarget =
+          ts?.enabled && ts.state === "imaging" && ts.target
+            ? `${ts.target}${ts.project ? ` (TS: ${ts.project})` : ""}`
+            : null;
         kv(dl, [
           ["Machine", info.machineName],
           ["Profile", info.profile],
           ["NINA", info.ninaVersion],
-          ["Target", sequence.activeTarget],
+          ["Target", tsTarget || sequence.activeTarget],
+          [
+            "Scheduler",
+            ts?.enabled && ts.state === "waiting"
+              ? `Waiting for ${ts.target ?? "next target"} (${fmt.until(ts.waitUntilUtc) ?? "?"})`
+              : null,
+          ],
           ["Camera", exposing || cam?.state],
           [
             "Mount",
@@ -558,6 +635,566 @@ const CARDS = {
             el("span", { title: i.category || "" }, i.name),
           ),
         );
+      };
+    },
+  },
+
+  schedulerNow: {
+    title: "Scheduler: now",
+    span: 2,
+    needs: [],
+    mount(body, feed) {
+      const pill = el("span");
+      const headline = el("div", { class: "ts-headline" });
+      const sub = el("div", { class: "muted" });
+      const dl = el("dl", { class: "kv" });
+      const foot = el("div", { class: "muted small ts-foot" });
+      body.append(el("div", { class: "pills" }, pill), headline, sub, dl, foot);
+      return () => {
+        const ts = feed.status.scheduler;
+        if (!ts || !ts.enabled) {
+          setPill(pill, "Disabled", "");
+          headline.textContent = "";
+          sub.textContent = ts
+            ? "Target Scheduler integration is turned off in the plugin options."
+            : "This NINA's plugin version has no Target Scheduler support.";
+          kv(dl, []);
+          foot.textContent = "";
+          return;
+        }
+        const coords = ts.ra ? `${ts.ra}  ${ts.dec}` : null;
+        const last = ts.lastCompleted
+          ? [
+              "Last completed",
+              `${ts.lastCompleted.target} at ${fmt.hm(ts.lastCompleted.atUtc)}`,
+            ]
+          : [];
+        switch (ts.state) {
+          case "imaging":
+            setPill(pill, "Imaging", "ok");
+            headline.textContent = ts.target ?? "";
+            sub.textContent = ts.project ? `Project: ${ts.project}` : "";
+            kv(dl, [
+              [
+                "Exposure",
+                [ts.filter, fmt.num(ts.exposureSeconds, 0, "s"), ts.binning]
+                  .filter(Boolean)
+                  .join(" · "),
+              ],
+              [
+                "Gain / Offset",
+                ts.gain || ts.offset
+                  ? `${ts.gain ?? "–"} / ${ts.offset ?? "–"}`
+                  : null,
+              ],
+              ["Coordinates", coords],
+              ["Rotation", fmt.num(ts.rotation, 1, "°")],
+              [
+                "Started",
+                ts.sinceUtc
+                  ? `${fmt.hm(ts.sinceUtc)} (${fmt.ago(ts.sinceUtc)})`
+                  : null,
+              ],
+              [
+                "Target sets",
+                ts.targetEndsUtc
+                  ? `${fmt.hm(ts.targetEndsUtc)} (${fmt.until(ts.targetEndsUtc)})`
+                  : null,
+              ],
+              last,
+            ]);
+            break;
+          case "waiting":
+            setPill(pill, "Waiting", "warn");
+            headline.textContent = ts.target ? `Next: ${ts.target}` : "Waiting";
+            sub.textContent = ts.project ? `Project: ${ts.project}` : "";
+            kv(dl, [
+              [
+                "Starts",
+                ts.waitUntilUtc
+                  ? `${fmt.hm(ts.waitUntilUtc)} (${fmt.until(ts.waitUntilUtc)})`
+                  : null,
+              ],
+              ["Coordinates", coords],
+              ["Waiting since", fmt.hm(ts.sinceUtc)],
+              last,
+            ]);
+            break;
+          case "stopped":
+            setPill(pill, "Stopped", "");
+            headline.textContent = "Scheduler stopped";
+            sub.textContent = ts.target ? `Last target: ${ts.target}` : "";
+            kv(dl, [
+              [
+                "Stopped at",
+                ts.stoppedAtUtc
+                  ? `${fmt.hm(ts.stoppedAtUtc)} (${fmt.ago(ts.stoppedAtUtc)})`
+                  : null,
+              ],
+              last,
+            ]);
+            break;
+          default:
+            setPill(pill, "No activity", "");
+            headline.textContent = "";
+            sub.textContent =
+              "No Target Scheduler activity since NINA started.";
+            kv(dl, [last]);
+        }
+        foot.textContent = ts.apiReachable
+          ? `Target Scheduler ${ts.version}`
+          : `Target Scheduler API not reachable${ts.apiError ? ` (${ts.apiError})` : ""}. Check "Enable API" in Target Scheduler and the port in the plugin options.`;
+      };
+    },
+  },
+
+  schedulerPlan: {
+    title: "Tonight's plan",
+    span: 4,
+    needs: ["plan"],
+    mount(body, feed) {
+      const btn = el("button", { type: "button" }, "Refresh now");
+      const info = el("span", { class: "muted small" });
+      const err = el("span", { class: "error small" });
+      const timeline = el("div", { class: "ts-timeline" });
+      const table = el("div", { class: "tablewrap" });
+      body.append(
+        el("div", { class: "toolbar" }, btn, info, err),
+        timeline,
+        table,
+      );
+
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        btn.textContent = "Refreshing…";
+        err.textContent = "";
+        try {
+          await feed.refreshPlan();
+        } catch (e) {
+          err.textContent = `Refresh failed: ${e.message}`;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Refresh now";
+        }
+      });
+
+      const exposures = (it) =>
+        it.exposures
+          .map(
+            (x) =>
+              `${x.count}× ${x.filter}${x.exposureSeconds ? ` ${fmt.num(x.exposureSeconds, 0)}s` : ""}`,
+          )
+          .join(", ");
+
+      const render = () => {
+        const p = feed.plan;
+        if (!p) {
+          info.textContent = "Loading…";
+          return;
+        }
+        if (!p.enabled) {
+          info.textContent = "";
+          timeline.replaceChildren(
+            el("div", {
+              class: "muted",
+              text: "Target Scheduler integration is turned off in the plugin options.",
+            }),
+          );
+          table.replaceChildren();
+          btn.disabled = true;
+          return;
+        }
+        info.textContent = p.updatedUtc
+          ? `Updated ${fmt.hm(p.updatedUtc)} · next automatic refresh ${fmt.hm(p.nextAutoRefreshUtc)}`
+          : "Computing tonight's plan…";
+        if (!p.apiReachable)
+          err.textContent = `Target Scheduler API not reachable${p.apiError ? ` (${p.apiError})` : ""}`;
+        else if (!btn.disabled) err.textContent = "";
+
+        const items = p.items || [];
+        if (!items.length) {
+          timeline.replaceChildren(
+            el("div", {
+              class: "muted",
+              text: p.updatedUtc
+                ? "Nothing scheduled: no active targets are available tonight."
+                : "",
+            }),
+          );
+          table.replaceChildren();
+          return;
+        }
+
+        const start = new Date(items[0].startUtc).getTime();
+        const end = new Date(items.at(-1).endUtc).getTime();
+        const span = Math.max(1, end - start);
+        const pct = (iso) => ((new Date(iso).getTime() - start) / span) * 100;
+
+        const bars = items.map((it, i) => {
+          const label = it.waitPeriod ? "Wait" : it.name;
+          const bar = el(
+            "div",
+            {
+              class: `ts-bar ${it.waitPeriod ? "wait" : `c${i % 4}`}`,
+              title: `${label}${it.project ? ` (${it.project})` : ""}\n${fmt.hm(it.startUtc)} – ${fmt.hm(it.endUtc)}${it.waitPeriod ? "" : `\n${exposures(it)}`}`,
+            },
+            it.waitPeriod ? "" : it.name,
+          );
+          bar.style.left = `${pct(it.startUtc)}%`;
+          bar.style.width = `${Math.max(0.4, pct(it.endUtc) - pct(it.startUtc))}%`;
+          return bar;
+        });
+        const nowPct = ((Date.now() - start) / span) * 100;
+        let marker = null;
+        if (nowPct >= 0 && nowPct <= 100) {
+          marker = el("div", { class: "ts-now", title: "Now" });
+          marker.style.left = `${nowPct}%`;
+        }
+        timeline.replaceChildren(
+          el("div", { class: "ts-track" }, ...bars, marker),
+          el(
+            "div",
+            { class: "ts-axis" },
+            el("span", { text: fmt.hm(items[0].startUtc) }),
+            el("span", { text: fmt.hm(items.at(-1).endUtc) }),
+          ),
+        );
+
+        table.replaceChildren(
+          el(
+            "table",
+            null,
+            el(
+              "thead",
+              null,
+              el(
+                "tr",
+                null,
+                ...[
+                  "Time",
+                  "Target",
+                  "Project",
+                  "Planned exposures",
+                  "Duration",
+                ].map((h) => el("th", { text: h })),
+              ),
+            ),
+            el(
+              "tbody",
+              null,
+              ...items.map((it) =>
+                el(
+                  "tr",
+                  { class: it.waitPeriod ? "muted" : null },
+                  el("td", {
+                    text: `${fmt.hm(it.startUtc)} – ${fmt.hm(it.endUtc)}`,
+                  }),
+                  el("td", { text: it.waitPeriod ? "Wait" : it.name }),
+                  el("td", { text: it.project ?? "" }),
+                  el("td", { text: exposures(it) }),
+                  el("td", {
+                    text: fmt.duration(
+                      (new Date(it.endUtc) - new Date(it.startUtc)) / 1000,
+                    ),
+                  }),
+                ),
+              ),
+            ),
+          ),
+        );
+      };
+      // Status ticks keep the "now" marker moving between plan refreshes.
+      return (kind) => {
+        if (kind === "plan" || kind === "all" || kind === "status") render();
+      };
+    },
+  },
+
+  schedulerProgress: {
+    title: "Project progress",
+    span: 4,
+    needs: ["progress"],
+    mount(body, feed) {
+      const showAll = el("input", { type: "checkbox" });
+      const info = el("span", { class: "muted small" });
+      const err = el("span", { class: "error small" });
+      const container = el("div", { class: "ts-projects" });
+      body.append(
+        el(
+          "div",
+          { class: "toolbar" },
+          el(
+            "label",
+            { class: "small" },
+            showAll,
+            " show inactive projects & targets",
+          ),
+          info,
+          err,
+        ),
+        container,
+      );
+      const expanded = new Set();
+      const statsCache = new Map();
+
+      const bar = (pct) => {
+        const fill = el("div", { class: "bar-fill" });
+        fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+        return el("div", { class: "bar" }, fill);
+      };
+
+      const meanSd = (m, sd, d) =>
+        m == null
+          ? "—"
+          : `${m.toFixed(d)}${sd != null ? ` ± ${sd.toFixed(d)}` : ""}`;
+
+      const renderStats = (holder, rows) => {
+        if (!rows.length) {
+          holder.replaceChildren(
+            el("div", { class: "muted small", text: "No statistics yet." }),
+          );
+          return;
+        }
+        holder.replaceChildren(
+          el(
+            "table",
+            null,
+            el(
+              "thead",
+              null,
+              el(
+                "tr",
+                null,
+                ...["Filter", "Exp", "HFR", "FWHM", "Eccentricity"].map((h) =>
+                  el("th", { text: h }),
+                ),
+              ),
+            ),
+            el(
+              "tbody",
+              null,
+              ...rows.map((r) =>
+                el(
+                  "tr",
+                  null,
+                  el("td", { text: r.filter ?? "" }),
+                  el("td", { text: fmt.num(r.exposureSeconds, 0, "s") ?? "" }),
+                  el("td", { text: meanSd(r.hfrMean, r.hfrStDev, 2) }),
+                  el("td", { text: meanSd(r.fwhmMean, r.fwhmStDev, 2) }),
+                  el("td", {
+                    text: meanSd(r.eccentricityMean, r.eccentricityStDev, 2),
+                  }),
+                ),
+              ),
+            ),
+          ),
+        );
+      };
+
+      const loadStats = async (targetId, holder) => {
+        holder.replaceChildren(
+          el("div", { class: "muted small", text: "Loading statistics…" }),
+        );
+        try {
+          const rows = await api(
+            feed.dev,
+            `/api/v1/scheduler/targets/${encodeURIComponent(targetId)}/statistics`,
+            30000,
+          );
+          statsCache.set(targetId, rows);
+          if (expanded.has(targetId)) renderStats(holder, rows);
+        } catch (e) {
+          holder.replaceChildren(
+            el("div", {
+              class: "error small",
+              text: `Statistics unavailable: ${e.message}`,
+            }),
+          );
+        }
+      };
+
+      const targetRow = (t) => {
+        const remaining = t.filters.filter((f) => f.remaining > 0);
+        const summary = remaining.length
+          ? `Remaining: ${remaining
+              .map(
+                (f) =>
+                  `${f.filter} ${f.remaining}×${f.exposureSeconds ? ` ${fmt.num(f.exposureSeconds, 0)}s` : ""}${f.remainingSeconds ? ` (${fmt.duration(f.remainingSeconds)})` : ""}`,
+              )
+              .join(" · ")}`
+          : "All filters complete ✓";
+
+        const stats = el("div", {
+          class: "ts-stats",
+          hidden: !expanded.has(t.id),
+        });
+        if (expanded.has(t.id) && statsCache.has(t.id))
+          renderStats(stats, statsCache.get(t.id));
+        const toggle = el(
+          "button",
+          { type: "button", class: "small-btn" },
+          expanded.has(t.id) ? "Hide stats" : "Stats",
+        );
+        toggle.addEventListener("click", () => {
+          if (expanded.has(t.id)) {
+            expanded.delete(t.id);
+            stats.hidden = true;
+            toggle.textContent = "Stats";
+            return;
+          }
+          expanded.add(t.id);
+          stats.hidden = false;
+          toggle.textContent = "Hide stats";
+          if (statsCache.has(t.id)) renderStats(stats, statsCache.get(t.id));
+          else loadStats(t.id, stats);
+        });
+
+        const filterRows = t.filters.map((f) =>
+          el(
+            "tr",
+            { class: f.remaining > 0 ? null : "muted" },
+            el("td", { text: f.filter ?? f.template ?? "" }),
+            el("td", { text: fmt.num(f.exposureSeconds, 0, "s") ?? "" }),
+            el(
+              "td",
+              { class: "bar-cell" },
+              bar(f.desired ? (100 * f.accepted) / f.desired : 100),
+            ),
+            el("td", { text: `${f.accepted} / ${f.desired}` }),
+            el("td", {
+              text: `${f.acquired}${f.ungraded ? ` (${f.ungraded} ungraded)` : ""}`,
+            }),
+            el("td", {
+              text:
+                f.remaining > 0
+                  ? `${f.remaining}×${f.remainingSeconds ? ` · ${fmt.duration(f.remainingSeconds)}` : ""}`
+                  : "✓",
+            }),
+          ),
+        );
+
+        return el(
+          "div",
+          { class: `ts-target${t.active ? "" : " off"}` },
+          el(
+            "div",
+            { class: "ts-target-head" },
+            el("strong", { text: t.name }),
+            bar(t.percentComplete ?? 0),
+            el("span", {
+              class: "small",
+              text:
+                t.percentComplete == null
+                  ? "—"
+                  : `${fmt.num(t.percentComplete, 0)}%`,
+            }),
+            toggle,
+          ),
+          el("div", { class: "small ts-remaining", text: summary }),
+          el(
+            "table",
+            { class: "ts-filters" },
+            el(
+              "thead",
+              null,
+              el(
+                "tr",
+                null,
+                ...[
+                  "Filter",
+                  "Exp",
+                  "Progress",
+                  "Accepted",
+                  "Acquired",
+                  "Remaining",
+                ].map((h) => el("th", { text: h })),
+              ),
+            ),
+            el("tbody", null, ...filterRows),
+          ),
+          stats,
+        );
+      };
+
+      const render = () => {
+        const p = feed.progress;
+        if (!p) {
+          info.textContent = "Loading…";
+          return;
+        }
+        if (!p.enabled) {
+          info.textContent = "";
+          container.replaceChildren(
+            el("div", {
+              class: "muted",
+              text: "Target Scheduler integration is turned off in the plugin options.",
+            }),
+          );
+          return;
+        }
+        info.textContent = p.updatedUtc
+          ? `Updated ${fmt.hm(p.updatedUtc)}`
+          : "Loading projects…";
+        err.textContent = p.apiReachable
+          ? ""
+          : `Target Scheduler API not reachable${p.apiError ? ` (${p.apiError})` : ""}`;
+
+        const projects = (p.projects || []).filter(
+          (pr) => showAll.checked || pr.state === "Active",
+        );
+        if (!projects.length) {
+          container.replaceChildren(
+            el("div", {
+              class: "muted",
+              text: p.updatedUtc ? "No active projects." : "",
+            }),
+          );
+          return;
+        }
+        container.replaceChildren(
+          ...projects.map((pr) => {
+            const targets = pr.targets.filter(
+              (t) => showAll.checked || t.active,
+            );
+            return el(
+              "section",
+              { class: "ts-project" },
+              el(
+                "header",
+                null,
+                el("strong", { text: pr.name }),
+                el("span", {
+                  class: `pill ${pr.state === "Active" ? "ok" : ""}`,
+                  text: pr.state,
+                }),
+                el("span", {
+                  class: "muted small",
+                  text: `priority ${pr.priority}`,
+                }),
+                bar(pr.percentComplete ?? 0),
+                el("span", {
+                  class: "small",
+                  text:
+                    pr.percentComplete == null
+                      ? "no exposures planned"
+                      : `${fmt.num(pr.percentComplete, 0)}% · ${pr.remainingSeconds > 0 ? `${fmt.duration(pr.remainingSeconds)} of exposures left` : "complete"}`,
+                }),
+              ),
+              ...(targets.length
+                ? targets.map(targetRow)
+                : [
+                    el("div", {
+                      class: "muted small",
+                      text: "No active targets.",
+                    }),
+                  ]),
+            );
+          }),
+        );
+      };
+      showAll.addEventListener("change", render);
+      return (kind) => {
+        if (kind === "progress" || kind === "all") render();
       };
     },
   },

@@ -43,12 +43,14 @@ namespace Naztronomy.NINA.RemoteTelemetry.Telemetry {
         private readonly TelemetrySources s;
         private readonly ImageTracker images;
         private readonly LogTracker logs;
+        private readonly Func<object> scheduler;
         private readonly DateTime startedUtc = DateTime.UtcNow;
 
-        public TelemetryCollector(TelemetrySources sources, ImageTracker images, LogTracker logs) {
+        public TelemetryCollector(TelemetrySources sources, ImageTracker images, LogTracker logs, Func<object> scheduler = null) {
             s = sources;
             this.images = images;
             this.logs = logs;
+            this.scheduler = scheduler;
         }
 
         public object GetInfo() {
@@ -77,6 +79,7 @@ namespace Naztronomy.NINA.RemoteTelemetry.Telemetry {
             devices = GetDevices(),
             lastImage = images.Latest,
             issues = logs.GetSummary(10),
+            scheduler = scheduler?.Invoke(),
         };
 
         public object GetSafety() {

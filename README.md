@@ -61,6 +61,15 @@ All responses are JSON (camelCase, UTC timestamps, `null` for unavailable values
 | `GET /api/v1/logs?limit=200&level=Info&after=<id>` | Log tail; `after` returns only newer entries                                                                                                                                                   |
 | `GET /api/v1/issues?limit=100`                     | Recent warnings/errors/fatals                                                                                                                                                                  |
 | `GET /api/v1/guiding?after=<unixMs>&limit=600`     | Guide steps (RA/Dec error in px and ″, correction pulses in ms) and dither times; `after` returns only newer steps                                                                             |
+| `GET /api/v1/scheduler`                            | Target Scheduler right now: imaging / waiting / stopped, project, target, filter, exposure, when the target sets                                                                               |
+| `GET /api/v1/scheduler/plan`                       | Tonight's plan (Target Scheduler preview), refreshed automatically once an hour                                                                                                                |
+| `POST /api/v1/scheduler/plan/refresh`              | Re-run the preview now (15 s cooldown). Changes nothing in NINA                                                                                                                                |
+| `GET /api/v1/scheduler/progress`                   | Projects → targets → per-filter desired / acquired / accepted, remaining count and exposure time                                                                                               |
+| `GET /api/v1/scheduler/targets/{id}/statistics`    | HFR / FWHM / eccentricity per filter for a target                                                                                                                                              |
+
+### Target Scheduler
+
+Enable **API** in Target Scheduler's profile preferences, then check the port (default 8188) under **Target Scheduler** in this plugin's options. Target Scheduler's API has no authentication, so this plugin only calls it on the NINA machine itself and re-serves the data through its own API and key. Leave Target Scheduler's port closed to the network.
 
 Example:
 
