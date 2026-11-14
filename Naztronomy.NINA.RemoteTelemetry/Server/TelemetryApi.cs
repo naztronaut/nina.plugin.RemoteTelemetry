@@ -49,17 +49,19 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
         private readonly GuideTracker guiding;
         private readonly TargetSchedulerTracker scheduler;
         private readonly AllSkyService allSky;
+        private readonly SequenceTracker sequenceTracker;
         private readonly Func<double?> guiderPixelScale;
         private readonly Func<string> apiKey;
         private readonly Func<string> allowedOrigins;
 
-        public TelemetryApi(TelemetryCollector collector, ImageTracker images, LogTracker logs, GuideTracker guiding, TargetSchedulerTracker scheduler, AllSkyService allSky, Func<double?> guiderPixelScale, Func<string> apiKey, Func<string> allowedOrigins) {
+        public TelemetryApi(TelemetryCollector collector, ImageTracker images, LogTracker logs, GuideTracker guiding, TargetSchedulerTracker scheduler, AllSkyService allSky, SequenceTracker sequenceTracker, Func<double?> guiderPixelScale, Func<string> apiKey, Func<string> allowedOrigins) {
             this.collector = collector;
             this.images = images;
             this.logs = logs;
             this.guiding = guiding;
             this.scheduler = scheduler;
             this.allSky = allSky;
+            this.sequenceTracker = sequenceTracker;
             this.guiderPixelScale = guiderPixelScale;
             this.apiKey = apiKey;
             this.allowedOrigins = allowedOrigins;
@@ -127,6 +129,11 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
 
                 case "/api/v1/sequence":
                     return Json(collector.GetSequence());
+
+                case "/api/v1/sequence/targets":
+                    using (var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(15))) {
+                        return Json(await sequenceTracker.GetAsync(cts.Token).ConfigureAwait(false));
+                    }
 
                 case "/api/v1/images":
                     return Json(images.GetHistory(req.QueryInt("limit", 50, 1, 300)));

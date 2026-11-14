@@ -32,12 +32,14 @@ function kv(target, pairs) {
 const fmt = {
   num: (v, d = 1, unit = "") =>
     v == null ? null : `${Number(v).toFixed(d)}${unit}`,
-  time: (iso) => (iso ? new Date(iso).toLocaleTimeString() : null),
-  hm: (iso) =>
+  time: (iso, tz) =>
+    iso ? new Date(iso).toLocaleTimeString([], zoneOpts(tz)) : null,
+  hm: (iso, tz) =>
     iso
       ? new Date(iso).toLocaleTimeString([], {
           hour: "2-digit",
           minute: "2-digit",
+          ...zoneOpts(tz),
         })
       : null,
   duration(seconds) {
@@ -85,7 +87,46 @@ const KEYS = {
   layout: "nina-remote-telemetry.layout",
   view: "nina-remote-telemetry.view",
   night: "nina-remote-telemetry.night",
+  timeMode: "nina-remote-telemetry.timeMode",
 };
+
+// Times are shown in each NINA's own time zone unless the user picks "My time".
+let timeMode = localStorage.getItem(KEYS.timeMode) || "observatory";
+// Zone of the card currently being rendered; set by the card wrapper.
+let currentTz;
+
+function zoneOpts(tz) {
+  const zone = tz === undefined ? currentTz : tz;
+  return timeMode === "observatory" && zone ? { timeZone: zone } : {};
+}
+
+function zoneFor(info) {
+  const valid = (z) => {
+    try {
+      new Intl.DateTimeFormat([], { timeZone: z });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (info?.timeZone && valid(info.timeZone)) return info.timeZone;
+  const m = info?.utcOffsetMinutes;
+  // Etc/GMT zones have inverted signs: Etc/GMT-2 is UTC+2.
+  if (m != null && m % 60 === 0) {
+    const z =
+      m === 0 ? "Etc/GMT" : `Etc/GMT${m > 0 ? "-" : "+"}${Math.abs(m / 60)}`;
+    if (valid(z)) return z;
+  }
+  return undefined;
+}
+
+function offsetLabel(info) {
+  const m = info?.utcOffsetMinutes;
+  if (m == null) return "";
+  const sign = m < 0 ? "-" : "+";
+  const a = Math.abs(m);
+  return `UTC${sign}${String(Math.floor(a / 60)).padStart(2, "0")}:${String(a % 60).padStart(2, "0")}`;
+}
 
 let devices = [];
 let layout = []; // [{ id, type, deviceId, span }]
@@ -251,6 +292,7 @@ class Feed {
       }
       this.startedUtc = st.info.pluginStartedUtc;
       this.status = st;
+      this.tz = zoneFor(st.info);
       this.error = null;
       this.updatedAt = Date.now();
       setHealth(this.dev, st);
@@ -539,6 +581,16 @@ const DEVICE_VIEWS = {
   ],
 };
 
+function withZone(feed, fn) {
+  const prev = currentTz;
+  currentTz = feed.tz ?? null;
+  try {
+    return fn();
+  } finally {
+    currentTz = prev;
+  }
+}
+
 function logItem(e) {
   return el(
     "li",
@@ -628,7 +680,11 @@ const CARDS = {
             "Meridian flip",
             eq.mount?.connected ? eq.mount.timeToMeridianFlip : null,
           ],
-          ["Updated", new Date(feed.updatedAt).toLocaleTimeString()],
+          [
+            "Observatory time",
+            `${fmt.hm(Date.now(), feed.tz ?? null)} ${offsetLabel(info)}${info.timeZone ? ` (${info.timeZone})` : ""}`,
+          ],
+          ["Updated", fmt.time(feed.updatedAt)],
         ]);
         running.replaceChildren(
           ...(sequence.runningItems || []).map((i) =>
@@ -805,7 +861,7 @@ const CARDS = {
           return;
         }
         info.textContent = p.updatedUtc
-          ? `Updated ${fmt.hm(p.updatedUtc)} · next automatic refresh ${fmt.hm(p.nextAutoRefreshUtc)}`
+          ? `Updated ${fmt.hm(p.updatedUtc)} · next automatic refresh ${fmt.hm(p.nextAutoRefreshUtc)}${timeMode === "observatory" && feed.status ? ` · times in observatory time (${offsetLabel(feed.status.info)})` : ""}`
           : "Computing tonight's plan…";
         if (!p.apiReachable)
           err.textContent = `Target Scheduler API not reachable${p.apiError ? ` (${p.apiError})` : ""}`;
@@ -891,7 +947,7 @@ const CARDS = {
                   }),
                   el("td", { text: it.waitPeriod ? "Wait" : it.name }),
                   el("td", { text: it.project ?? "" }),
-                  el("td", { text: exposures(it) }),
+                  el("td", { class: "wrap", text: exposures(it) }),
                   el("td", {
                     text: fmt.duration(
                       (new Date(it.endUtc) - new Date(it.startUtc)) / 1000,
@@ -915,23 +971,27 @@ const CARDS = {
     span: 4,
     needs: ["progress"],
     mount(body, feed) {
-      const showAll = el("input", { type: "checkbox" });
+      const prefKey = "nina-remote-telemetry.progressFilters";
+      const prefs = readJson(prefKey, { done: false, inactive: false });
+      const showDone = el("input", { type: "checkbox", checked: prefs.done });
+      const showAll = el("input", {
+        type: "checkbox",
+        checked: prefs.inactive,
+      });
       const info = el("span", { class: "muted small" });
       const err = el("span", { class: "error small" });
+      const summaryLine = el("div", { class: "small ts-summary" });
       const container = el("div", { class: "ts-projects" });
       body.append(
         el(
           "div",
           { class: "toolbar" },
-          el(
-            "label",
-            { class: "small" },
-            showAll,
-            " show inactive projects & targets",
-          ),
+          el("label", { class: "small" }, showDone, " show completed"),
+          el("label", { class: "small" }, showAll, " show inactive"),
           info,
           err,
         ),
+        summaryLine,
         container,
       );
       const expanded = new Set();
@@ -940,7 +1000,7 @@ const CARDS = {
       const bar = (pct) => {
         const fill = el("div", { class: "bar-fill" });
         fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
-        return el("div", { class: "bar" }, fill);
+        return el("div", { class: "bar compact" }, fill);
       };
 
       const meanSd = (m, sd, d) =>
@@ -1013,65 +1073,97 @@ const CARDS = {
         }
       };
 
+      const isDone = (t) =>
+        t.percentComplete == null || t.percentComplete >= 100;
+
+      const filterTable = (filters) =>
+        el(
+          "table",
+          { class: "ts-filters" },
+          el(
+            "thead",
+            null,
+            el(
+              "tr",
+              null,
+              ...[
+                "Filter",
+                "Exp",
+                "Progress",
+                "Accepted",
+                "Acquired",
+                "Remaining",
+              ].map((h) => el("th", { text: h })),
+            ),
+          ),
+          el(
+            "tbody",
+            null,
+            ...filters.map((f) =>
+              el(
+                "tr",
+                { class: f.remaining > 0 ? null : "muted" },
+                el("td", { text: f.filter ?? f.template ?? "" }),
+                el("td", { text: fmt.num(f.exposureSeconds, 0, "s") ?? "" }),
+                el(
+                  "td",
+                  { class: "bar-cell" },
+                  bar(f.desired ? (100 * f.accepted) / f.desired : 100),
+                ),
+                el("td", { text: `${f.accepted} / ${f.desired}` }),
+                el("td", {
+                  text: `${f.acquired}${f.ungraded ? ` (${f.ungraded} ungraded)` : ""}`,
+                }),
+                el("td", {
+                  text:
+                    f.remaining > 0
+                      ? `${f.remaining}×${f.remainingSeconds ? ` · ${fmt.duration(f.remainingSeconds)}` : ""}`
+                      : "✓",
+                }),
+              ),
+            ),
+          ),
+        );
+
       const targetRow = (t) => {
         const remaining = t.filters.filter((f) => f.remaining > 0);
+        const filters = showDone.checked ? t.filters : remaining;
         const summary = remaining.length
-          ? `Remaining: ${remaining
-              .map(
-                (f) =>
-                  `${f.filter} ${f.remaining}×${f.exposureSeconds ? ` ${fmt.num(f.exposureSeconds, 0)}s` : ""}${f.remainingSeconds ? ` (${fmt.duration(f.remainingSeconds)})` : ""}`,
-              )
-              .join(" · ")}`
-          : "All filters complete ✓";
+          ? `${remaining.map((f) => `${f.filter} ${f.remaining}×`).join(" · ")} · ${fmt.duration(t.remainingSeconds)} left`
+          : t.filters.length
+            ? "complete ✓"
+            : "no exposure plans";
 
-        const stats = el("div", {
-          class: "ts-stats",
-          hidden: !expanded.has(t.id),
-        });
-        if (expanded.has(t.id) && statsCache.has(t.id))
-          renderStats(stats, statsCache.get(t.id));
+        const open = expanded.has(t.id);
+        const stats = el("div", { class: "ts-stats" });
+        const details = el(
+          "div",
+          { class: "ts-details", hidden: !open },
+          filterTable(filters),
+          stats,
+        );
         const toggle = el(
           "button",
           { type: "button", class: "small-btn" },
-          expanded.has(t.id) ? "Hide stats" : "Stats",
+          open ? "Hide" : "Details",
         );
+        const showStats = () => {
+          if (statsCache.has(t.id)) renderStats(stats, statsCache.get(t.id));
+          else loadStats(t.id, stats);
+        };
+        if (open) showStats();
         toggle.addEventListener("click", () => {
           if (expanded.has(t.id)) {
             expanded.delete(t.id);
-            stats.hidden = true;
-            toggle.textContent = "Stats";
+            details.hidden = true;
+            toggle.textContent = "Details";
             return;
           }
           expanded.add(t.id);
-          stats.hidden = false;
-          toggle.textContent = "Hide stats";
-          if (statsCache.has(t.id)) renderStats(stats, statsCache.get(t.id));
-          else loadStats(t.id, stats);
+          details.hidden = false;
+          toggle.textContent = "Hide";
+          showStats();
         });
-
-        const filterRows = t.filters.map((f) =>
-          el(
-            "tr",
-            { class: f.remaining > 0 ? null : "muted" },
-            el("td", { text: f.filter ?? f.template ?? "" }),
-            el("td", { text: fmt.num(f.exposureSeconds, 0, "s") ?? "" }),
-            el(
-              "td",
-              { class: "bar-cell" },
-              bar(f.desired ? (100 * f.accepted) / f.desired : 100),
-            ),
-            el("td", { text: `${f.accepted} / ${f.desired}` }),
-            el("td", {
-              text: `${f.acquired}${f.ungraded ? ` (${f.ungraded} ungraded)` : ""}`,
-            }),
-            el("td", {
-              text:
-                f.remaining > 0
-                  ? `${f.remaining}×${f.remainingSeconds ? ` · ${fmt.duration(f.remainingSeconds)}` : ""}`
-                  : "✓",
-            }),
-          ),
-        );
 
         return el(
           "div",
@@ -1079,40 +1171,23 @@ const CARDS = {
           el(
             "div",
             { class: "ts-target-head" },
-            el("strong", { text: t.name }),
+            el("strong", { text: t.name, title: t.name }),
             bar(t.percentComplete ?? 0),
             el("span", {
-              class: "small",
+              class: "small ts-pct",
               text:
                 t.percentComplete == null
                   ? "—"
                   : `${fmt.num(t.percentComplete, 0)}%`,
             }),
+            el("span", {
+              class: "small ts-remaining",
+              text: summary,
+              title: summary,
+            }),
             toggle,
           ),
-          el("div", { class: "small ts-remaining", text: summary }),
-          el(
-            "table",
-            { class: "ts-filters" },
-            el(
-              "thead",
-              null,
-              el(
-                "tr",
-                null,
-                ...[
-                  "Filter",
-                  "Exp",
-                  "Progress",
-                  "Accepted",
-                  "Acquired",
-                  "Remaining",
-                ].map((h) => el("th", { text: h })),
-              ),
-            ),
-            el("tbody", null, ...filterRows),
-          ),
-          stats,
+          details,
         );
       };
 
@@ -1139,24 +1214,43 @@ const CARDS = {
           ? ""
           : `Target Scheduler API not reachable${p.apiError ? ` (${p.apiError})` : ""}`;
 
-        const projects = (p.projects || []).filter(
-          (pr) => showAll.checked || pr.state === "Active",
+        const projects = (p.projects || [])
+          .filter((pr) => showAll.checked || pr.state === "Active")
+          .map((pr) => ({
+            ...pr,
+            visible: pr.targets.filter(
+              (t) =>
+                (showAll.checked || t.active) &&
+                (showDone.checked || !isDone(t)),
+            ),
+          }))
+          .filter(
+            (pr) => pr.visible.length || (showDone.checked && showAll.checked),
+          );
+
+        const active = (p.projects || []).filter((pr) => pr.state === "Active");
+        const openTargets = active.flatMap((pr) =>
+          pr.targets.filter((t) => t.active && !isDone(t)),
         );
+        const doneTargets = active.flatMap((pr) =>
+          pr.targets.filter((t) => t.active && t.percentComplete >= 100),
+        );
+        summaryLine.textContent = `${openTargets.length} target${openTargets.length === 1 ? "" : "s"} in progress · ${fmt.duration(openTargets.reduce((s, t) => s + (t.remainingSeconds || 0), 0)) || "0m"} of exposures left · ${doneTargets.length} complete`;
+
         if (!projects.length) {
           container.replaceChildren(
             el("div", {
               class: "muted",
-              text: p.updatedUtc ? "No active projects." : "",
+              text: p.updatedUtc
+                ? "Nothing left to image in active projects. Tick “show completed” to see finished work."
+                : "",
             }),
           );
           return;
         }
         container.replaceChildren(
-          ...projects.map((pr) => {
-            const targets = pr.targets.filter(
-              (t) => showAll.checked || t.active,
-            );
-            return el(
+          ...projects.map((pr) =>
+            el(
               "section",
               { class: "ts-project" },
               el(
@@ -1177,22 +1271,33 @@ const CARDS = {
                   text:
                     pr.percentComplete == null
                       ? "no exposures planned"
-                      : `${fmt.num(pr.percentComplete, 0)}% · ${pr.remainingSeconds > 0 ? `${fmt.duration(pr.remainingSeconds)} of exposures left` : "complete"}`,
+                      : `${fmt.num(pr.percentComplete, 0)}% · ${pr.remainingSeconds > 0 ? `${fmt.duration(pr.remainingSeconds)} left` : "complete"}`,
                 }),
               ),
-              ...(targets.length
-                ? targets.map(targetRow)
+              ...(pr.visible.length
+                ? pr.visible.map(targetRow)
                 : [
                     el("div", {
                       class: "muted small",
-                      text: "No active targets.",
+                      text: "No targets to show.",
                     }),
                   ]),
-            );
-          }),
+            ),
+          ),
         );
       };
-      showAll.addEventListener("change", render);
+      for (const box of [showDone, showAll]) {
+        box.addEventListener("change", () => {
+          localStorage.setItem(
+            prefKey,
+            JSON.stringify({
+              done: showDone.checked,
+              inactive: showAll.checked,
+            }),
+          );
+          withZone(feed, render);
+        });
+      }
       return (kind) => {
         if (kind === "progress" || kind === "all") render();
       };
@@ -1249,9 +1354,9 @@ const CARDS = {
         }
         info.textContent = [
           last.imageTimeUtc
-            ? `Image from ${fmt.hm(last.imageTimeUtc)} (${fmt.ago(last.imageTimeUtc)})`
+            ? `Image from ${fmt.hm(last.imageTimeUtc, feed.tz ?? null)} (${fmt.ago(last.imageTimeUtc)})`
             : null,
-          nextAt ? `next update ${fmt.hm(nextAt)}` : null,
+          nextAt ? `next update ${fmt.hm(nextAt, null)} (your time)` : null,
         ]
           .filter(Boolean)
           .join(" · ");
@@ -1592,6 +1697,7 @@ const CARDS = {
           feed.history.filter(
             (i) => (i.imageType || "").toUpperCase() === "LIGHT",
           ),
+          feed.tz ?? null,
         );
       const observer = new ResizeObserver(draw);
       observer.observe(canvas);
@@ -1656,7 +1762,7 @@ const CARDS = {
         list.replaceChildren(...feed.logs.filter(visible).map(logItem));
         scroll();
       };
-      level.addEventListener("change", rebuild);
+      level.addEventListener("change", () => withZone(feed, rebuild));
       return (kind, entries) => {
         if (kind === "all" || (kind === "logs" && !entries)) return rebuild();
         if (kind !== "logs") return;
@@ -1734,7 +1840,7 @@ const CARDS = {
   },
 };
 
-function drawChart(canvas, points) {
+function drawChart(canvas, points, tz) {
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth;
   const h = 180;
@@ -1784,8 +1890,8 @@ function drawChart(canvas, points) {
   series("hfr", style.getPropertyValue("--accent"), false);
   series("stars", style.getPropertyValue("--warn"), true);
   ctx.fillStyle = muted;
-  ctx.fillText(fmt.time(points[0].timestampUtc), pad.l, h - 3);
-  const last = fmt.time(points.at(-1).timestampUtc);
+  ctx.fillText(fmt.time(points[0].timestampUtc, tz), pad.l, h - 3);
+  const last = fmt.time(points.at(-1).timestampUtc, tz);
   ctx.fillText(last, w - pad.r - ctx.measureText(last).width, h - 3);
 }
 
@@ -1933,7 +2039,7 @@ function buildCard(cfg, custom) {
       update(kind, payload) {
         section.classList.toggle("stale", !!feed.error);
         status.textContent = feed.error ? `offline: ${feed.error.message}` : "";
-        if (feed.status) update(kind, payload);
+        if (feed.status) withZone(feed, () => update(kind, payload));
       },
     }),
   );
@@ -2212,6 +2318,12 @@ async function init() {
       KEYS.night,
       document.body.classList.toggle("night") ? "1" : "0",
     );
+  });
+  $("timeMode").value = timeMode;
+  $("timeMode").addEventListener("change", (e) => {
+    timeMode = e.target.value;
+    localStorage.setItem(KEYS.timeMode, timeMode);
+    renderView();
   });
   const openDevices = () => {
     renderDeviceList();

@@ -636,6 +636,21 @@
             "format": "date-time",
             "description": "Changes when NINA restarts"
           },
+          "timeZone": {
+            "type": "string",
+            "nullable": true,
+            "example": "Africa/Johannesburg",
+            "description": "IANA time zone of the NINA machine. All timestamps in this API are UTC; use this to show observatory-local times."
+          },
+          "timeZoneName": {
+            "type": "string",
+            "example": "South Africa Standard Time"
+          },
+          "utcOffsetMinutes": {
+            "type": "integer",
+            "example": 120,
+            "description": "Current offset from UTC"
+          },
           "location": {
             "type": "object",
             "nullable": true,

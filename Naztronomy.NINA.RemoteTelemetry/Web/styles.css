@@ -710,3 +710,8 @@ fieldset label {
   padding: 1px 8px;
   font-size: 12px;
 }
+
+td.wrap {
+  white-space: normal;
+  min-width: 260px;
+}

@@ -369,11 +369,15 @@ namespace Naztronomy.NINA.RemoteTelemetry.Telemetry {
                     waitPeriod = i.WaitPeriod,
                     startUtc = i.StartTime.UtcDateTime,
                     endUtc = i.EndTime.UtcDateTime,
-                    exposures = (i.ExposurePlan ?? new List<TsPreviewExposure>()).Where(x => x.Count > 0).Select(x => new {
-                        filter = x.FilterName,
-                        exposureSeconds = x.Exposure > 0 ? x.Exposure : (double?)null,
-                        count = x.Count,
-                    }).ToList(),
+                    exposures = (i.ExposurePlan ?? new List<TsPreviewExposure>())
+                        .Where(x => x.Count > 0)
+                        // TS lists one entry per filter switch; merge them, keeping first-seen order.
+                        .GroupBy(x => (x.FilterName, x.Exposure))
+                        .Select(g => new {
+                            filter = g.Key.FilterName,
+                            exposureSeconds = g.Key.Exposure > 0 ? g.Key.Exposure : (double?)null,
+                            count = g.Sum(x => x.Count),
+                        }).ToList(),
                 }).ToList();
                 lock (sync) {
                     plan = mapped;

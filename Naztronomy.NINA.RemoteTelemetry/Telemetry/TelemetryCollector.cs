@@ -64,12 +64,24 @@ namespace Naztronomy.NINA.RemoteTelemetry.Telemetry {
                 profile = profile?.Name,
                 serverTimeUtc = DateTime.UtcNow,
                 pluginStartedUtc = startedUtc,
+                timeZone = IanaTimeZone(),
+                timeZoneName = TimeZoneInfo.Local.IsDaylightSavingTime(DateTime.Now) ? TimeZoneInfo.Local.DaylightName : TimeZoneInfo.Local.StandardName,
+                utcOffsetMinutes = (int)TimeZoneInfo.Local.GetUtcOffset(DateTime.UtcNow).TotalMinutes,
                 location = profile == null ? null : new {
                     latitude = Num.N(profile.AstrometrySettings.Latitude),
                     longitude = Num.N(profile.AstrometrySettings.Longitude),
                     elevation = Num.N(profile.AstrometrySettings.Elevation),
                 },
             };
+        }
+
+        // Browsers need IANA ids (e.g. Africa/Johannesburg); Windows reports its own ids.
+        private static string IanaTimeZone() {
+            var tz = TimeZoneInfo.Local;
+            if (tz.HasIanaId) {
+                return tz.Id;
+            }
+            return TimeZoneInfo.TryConvertWindowsIdToIanaId(tz.Id, out var iana) ? iana : null;
         }
 
         public object GetStatus() => new {
