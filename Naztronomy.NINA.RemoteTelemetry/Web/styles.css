@@ -788,3 +788,42 @@ td.wrap {
     flex-basis: 100%;
   }
 }
+
+.bar-fill.done {
+  background: linear-gradient(90deg, #1f9d57, var(--ok));
+}
+
+/* ---------- Project progress readability ---------- */
+.ts-filters {
+  width: auto;
+  min-width: 640px;
+  max-width: 1100px;
+}
+.ts-filters th.num,
+.ts-filters td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ts-filters .bar-cell {
+  width: 140px;
+}
+.ts-filters .bar-cell .bar {
+  min-width: 120px;
+}
+.ts-project.single {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.ts-project.single .ts-target {
+  border-top: none;
+}
+.ts-project.running {
+  border-color: var(--accent);
+  box-shadow: var(--glow);
+}
+.ts-target.running .ts-target-head strong {
+  color: #e3c6ff;
+}
+.ts-details {
+  overflow-x: auto;
+}

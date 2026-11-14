@@ -48,6 +48,13 @@ const fmt = {
     if (m < 60) return `${m}m`;
     return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
   },
+  long(seconds) {
+    if (seconds == null) return null;
+    const h = seconds / 3600;
+    return h >= 48
+      ? `≈${(h / 24).toFixed(1)} days (${Math.round(h)} h)`
+      : fmt.duration(seconds);
+  },
   until(iso) {
     if (!iso) return null;
     const s = Math.round((new Date(iso).getTime() - Date.now()) / 1000);
@@ -997,12 +1004,27 @@ const CARDS = {
     tabs: ["ts"],
     mount(body, feed) {
       const prefKey = "nina-remote-telemetry.progressFilters";
-      const prefs = readJson(prefKey, { done: false, inactive: false });
+      const prefs = readJson(prefKey, {
+        done: false,
+        inactive: false,
+        sort: "priority",
+      });
       const showDone = el("input", { type: "checkbox", checked: prefs.done });
       const showAll = el("input", {
         type: "checkbox",
         checked: prefs.inactive,
       });
+      const sortBy = el(
+        "select",
+        { "aria-label": "Sort projects" },
+        ...[
+          ["priority", "Priority"],
+          ["progress", "% complete"],
+          ["left", "Time left"],
+          ["name", "Name"],
+        ].map(([v, t]) => el("option", { value: v, text: `Sort: ${t}` })),
+      );
+      sortBy.value = prefs.sort || "priority";
       const info = el("span", { class: "muted small" });
       const err = el("span", { class: "error small" });
       const summaryLine = el("div", { class: "small ts-summary" });
@@ -1013,6 +1035,7 @@ const CARDS = {
           { class: "toolbar" },
           el("label", { class: "small" }, showDone, " show completed"),
           el("label", { class: "small" }, showAll, " show inactive"),
+          sortBy,
           info,
           err,
         ),
@@ -1021,9 +1044,16 @@ const CARDS = {
       );
       const expanded = new Set();
       const statsCache = new Map();
+      let runningKey = null;
+      let autoExpandedKey = null;
+
+      const PRIORITY = ["Low priority", "Normal priority", "High priority"];
+      const priorityLabel = (p) => PRIORITY[p] ?? `priority ${p}`;
 
       const bar = (pct) => {
-        const fill = el("div", { class: "bar-fill" });
+        const fill = el("div", {
+          class: `bar-fill${pct >= 100 ? " done" : ""}`,
+        });
         fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
         return el("div", { class: "bar compact" }, fill);
       };
@@ -1033,76 +1063,53 @@ const CARDS = {
           ? "—"
           : `${m.toFixed(d)}${sd != null ? ` ± ${sd.toFixed(d)}` : ""}`;
 
-      const renderStats = (holder, rows) => {
-        if (!rows.length) {
-          holder.replaceChildren(
-            el("div", { class: "muted small", text: "No statistics yet." }),
-          );
-          return;
-        }
-        holder.replaceChildren(
-          el(
-            "table",
-            null,
-            el(
-              "thead",
-              null,
-              el(
-                "tr",
-                null,
-                ...["Filter", "Exp", "HFR", "FWHM", "Eccentricity"].map((h) =>
-                  el("th", { text: h }),
-                ),
-              ),
-            ),
-            el(
-              "tbody",
-              null,
-              ...rows.map((r) =>
-                el(
-                  "tr",
-                  null,
-                  el("td", { text: r.filter ?? "" }),
-                  el("td", { text: fmt.num(r.exposureSeconds, 0, "s") ?? "" }),
-                  el("td", { text: meanSd(r.hfrMean, r.hfrStDev, 2) }),
-                  el("td", { text: meanSd(r.fwhmMean, r.fwhmStDev, 2) }),
-                  el("td", {
-                    text: meanSd(r.eccentricityMean, r.eccentricityStDev, 2),
-                  }),
-                ),
-              ),
-            ),
-          ),
-        );
-      };
-
-      const loadStats = async (targetId, holder) => {
-        holder.replaceChildren(
-          el("div", { class: "muted small", text: "Loading statistics…" }),
-        );
-        try {
-          const rows = await api(
-            feed.dev,
-            `/api/v1/scheduler/targets/${encodeURIComponent(targetId)}/statistics`,
-            30000,
-          );
-          statsCache.set(targetId, rows);
-          if (expanded.has(targetId)) renderStats(holder, rows);
-        } catch (e) {
-          holder.replaceChildren(
-            el("div", {
-              class: "error small",
-              text: `Statistics unavailable: ${e.message}`,
-            }),
-          );
-        }
-      };
-
       const isDone = (t) =>
         t.percentComplete == null || t.percentComplete >= 100;
 
-      const filterTable = (filters) =>
-        el(
+      // Same filter + exposure + plan collapses to one row; same filter + exposure from different plans gets the plan name.
+      const mergeFilters = (filters) => {
+        const rows = new Map();
+        for (const f of filters) {
+          const key = `${f.filter}|${f.exposureSeconds}|${f.template}`;
+          const row = rows.get(key);
+          if (!row) {
+            rows.set(key, { ...f });
+            continue;
+          }
+          for (const k of [
+            "desired",
+            "acquired",
+            "accepted",
+            "ungraded",
+            "remaining",
+            "remainingSeconds",
+          ])
+            row[k] = (row[k] || 0) + (f[k] || 0);
+        }
+        const list = [...rows.values()];
+        const seen = new Map();
+        for (const r of list) {
+          const k = `${r.filter}|${r.exposureSeconds}`;
+          seen.set(k, (seen.get(k) || 0) + 1);
+        }
+        for (const r of list) {
+          const dup = seen.get(`${r.filter}|${r.exposureSeconds}`) > 1;
+          r.label =
+            dup && r.template && r.template !== r.filter
+              ? `${r.filter} · ${r.template}`
+              : (r.filter ?? r.template ?? "");
+        }
+        return list;
+      };
+
+      const filterTable = (rows, stats, loading) => {
+        const statFor = (r) =>
+          stats?.find(
+            (s) =>
+              s.filter === r.filter && s.exposureSeconds === r.exposureSeconds,
+          );
+        const q = (m, sd) => (loading ? "…" : meanSd(m, sd, 2));
+        return el(
           "table",
           { class: "ts-filters" },
           el(
@@ -1112,91 +1119,140 @@ const CARDS = {
               "tr",
               null,
               ...[
-                "Filter",
-                "Exp",
-                "Progress",
-                "Accepted",
-                "Acquired",
-                "Remaining",
-              ].map((h) => el("th", { text: h })),
+                ["Filter"],
+                ["Exp", "num"],
+                ["Progress"],
+                ["Accepted", "num"],
+                ["Acquired", "num"],
+                ["Remaining", "num"],
+                ["HFR", "num"],
+                ["FWHM", "num"],
+                ["Ecc.", "num"],
+              ].map(([h, c]) => el("th", { class: c, text: h })),
             ),
           ),
           el(
             "tbody",
             null,
-            ...filters.map((f) =>
-              el(
+            ...rows.map((r) => {
+              const s = statFor(r);
+              return el(
                 "tr",
-                { class: f.remaining > 0 ? null : "muted" },
-                el("td", { text: f.filter ?? f.template ?? "" }),
-                el("td", { text: fmt.num(f.exposureSeconds, 0, "s") ?? "" }),
+                { class: r.remaining > 0 ? null : "muted" },
+                el("td", { text: r.label }),
+                el("td", {
+                  class: "num",
+                  text: fmt.num(r.exposureSeconds, 0, "s") ?? "",
+                }),
                 el(
                   "td",
                   { class: "bar-cell" },
-                  bar(f.desired ? (100 * f.accepted) / f.desired : 100),
+                  bar(r.desired ? (100 * r.accepted) / r.desired : 100),
                 ),
-                el("td", { text: `${f.accepted} / ${f.desired}` }),
                 el("td", {
-                  text: `${f.acquired}${f.ungraded ? ` (${f.ungraded} ungraded)` : ""}`,
+                  class: "num",
+                  text: `${r.accepted} / ${r.desired}`,
                 }),
                 el("td", {
+                  class: "num",
+                  text: `${r.acquired}${r.ungraded ? ` (${r.ungraded} ungraded)` : ""}`,
+                }),
+                el("td", {
+                  class: "num",
                   text:
-                    f.remaining > 0
-                      ? `${f.remaining}×${f.remainingSeconds ? ` · ${fmt.duration(f.remainingSeconds)}` : ""}`
+                    r.remaining > 0
+                      ? `${r.remaining}×${r.remainingSeconds ? ` · ${fmt.duration(r.remainingSeconds)}` : ""}`
                       : "✓",
                 }),
-              ),
-            ),
+                el("td", { class: "num", text: q(s?.hfrMean, s?.hfrStDev) }),
+                el("td", { class: "num", text: q(s?.fwhmMean, s?.fwhmStDev) }),
+                el("td", {
+                  class: "num",
+                  text: q(s?.eccentricityMean, s?.eccentricityStDev),
+                }),
+              );
+            }),
           ),
         );
+      };
 
-      const targetRow = (t) => {
-        const remaining = t.filters.filter((f) => f.remaining > 0);
-        const filters = showDone.checked ? t.filters : remaining;
+      const loadStats = async (targetId) => {
+        try {
+          statsCache.set(
+            targetId,
+            await api(
+              feed.dev,
+              `/api/v1/scheduler/targets/${encodeURIComponent(targetId)}/statistics`,
+              30000,
+            ),
+          );
+        } catch {
+          statsCache.set(targetId, []);
+        }
+      };
+
+      // pr is passed when a single-target project is shown as one row.
+      const targetBlock = (t, pr) => {
+        const merged = mergeFilters(t.filters);
+        const remaining = merged.filter((f) => f.remaining > 0);
+        const rows = showDone.checked ? merged : remaining;
         const summary = remaining.length
-          ? `${remaining.map((f) => `${f.filter} ${f.remaining}×`).join(" · ")} · ${fmt.duration(t.remainingSeconds)} left`
-          : t.filters.length
+          ? `${remaining.map((f) => `${f.label} ${f.remaining}×`).join(" · ")} · ${fmt.long(t.remainingSeconds)} left`
+          : merged.length
             ? "complete ✓"
             : "no exposure plans";
 
         const open = expanded.has(t.id);
-        const stats = el("div", { class: "ts-stats" });
-        const details = el(
-          "div",
-          { class: "ts-details", hidden: !open },
-          filterTable(filters),
-          stats,
-        );
+        const details = el("div", { class: "ts-details", hidden: !open });
+        const fill = () => {
+          const cached = statsCache.get(t.id);
+          details.replaceChildren(
+            rows.length
+              ? filterTable(rows, cached, !cached)
+              : el("div", { class: "muted small", text: "No exposure plans." }),
+          );
+          if (!cached)
+            loadStats(t.id).then(() => {
+              if (expanded.has(t.id)) withZone(feed, fill);
+            });
+        };
+        if (open) fill();
         const toggle = el(
           "button",
           { type: "button", class: "small-btn" },
           open ? "Hide" : "Details",
         );
-        const showStats = () => {
-          if (statsCache.has(t.id)) renderStats(stats, statsCache.get(t.id));
-          else loadStats(t.id, stats);
-        };
-        if (open) showStats();
         toggle.addEventListener("click", () => {
-          if (expanded.has(t.id)) {
-            expanded.delete(t.id);
-            details.hidden = true;
-            toggle.textContent = "Details";
-            return;
-          }
-          expanded.add(t.id);
-          details.hidden = false;
-          toggle.textContent = "Hide";
-          showStats();
+          const nowOpen = !expanded.has(t.id);
+          if (nowOpen) expanded.add(t.id);
+          else expanded.delete(t.id);
+          details.hidden = !nowOpen;
+          toggle.textContent = nowOpen ? "Hide" : "Details";
+          if (nowOpen) fill();
         });
 
+        const name =
+          pr && pr.name !== t.name ? `${pr.name} · ${t.name}` : t.name;
+        const running = runningKey === `${pr?.name ?? t.projectName}|${t.name}`;
         return el(
           "div",
-          { class: `ts-target${t.active ? "" : " off"}` },
+          {
+            class: `ts-target${t.active ? "" : " off"}${running ? " running" : ""}`,
+          },
           el(
             "div",
             { class: "ts-target-head" },
-            el("strong", { text: t.name, title: t.name }),
+            el("strong", { text: name, title: name }),
+            running ? el("span", { class: "pill ok", text: "Imaging" }) : null,
+            pr && pr.state !== "Active"
+              ? el("span", { class: "pill", text: pr.state })
+              : null,
+            pr
+              ? el("span", {
+                  class: "muted small",
+                  text: priorityLabel(pr.priority),
+                })
+              : null,
             bar(t.percentComplete ?? 0),
             el("span", {
               class: "small ts-pct",
@@ -1214,6 +1270,25 @@ const CARDS = {
           ),
           details,
         );
+      };
+
+      const comparator = () => {
+        const pct = (x) => x.percentComplete ?? -1;
+        switch (sortBy.value) {
+          case "progress":
+            return (a, b) => pct(b) - pct(a) || a.name.localeCompare(b.name);
+          case "left":
+            return (a, b) =>
+              (a.remainingSeconds || 0) - (b.remainingSeconds || 0) ||
+              a.name.localeCompare(b.name);
+          case "name":
+            return (a, b) => a.name.localeCompare(b.name);
+          default:
+            return (a, b) =>
+              (b.priority ?? 0) - (a.priority ?? 0) ||
+              pct(b) - pct(a) ||
+              a.name.localeCompare(b.name);
+        }
       };
 
       const render = () => {
@@ -1239,19 +1314,32 @@ const CARDS = {
           ? ""
           : `Target Scheduler API not reachable${p.apiError ? ` (${p.apiError})` : ""}`;
 
+        // Open the target that is imaging right now, once per target change.
+        if (runningKey && runningKey !== autoExpandedKey) {
+          for (const pr of p.projects || [])
+            for (const t of pr.targets)
+              if (`${pr.name}|${t.name}` === runningKey) expanded.add(t.id);
+          autoExpandedKey = runningKey;
+        }
+
+        const sort = comparator();
         const projects = (p.projects || [])
           .filter((pr) => showAll.checked || pr.state === "Active")
           .map((pr) => ({
             ...pr,
-            visible: pr.targets.filter(
-              (t) =>
-                (showAll.checked || t.active) &&
-                (showDone.checked || !isDone(t)),
-            ),
+            visible: pr.targets
+              .filter(
+                (t) =>
+                  `${pr.name}|${t.name}` === runningKey ||
+                  ((showAll.checked || t.active) &&
+                    (showDone.checked || !isDone(t))),
+              )
+              .sort(sort),
           }))
           .filter(
             (pr) => pr.visible.length || (showDone.checked && showAll.checked),
-          );
+          )
+          .sort(sort);
 
         const active = (p.projects || []).filter((pr) => pr.state === "Active");
         const openTargets = active.flatMap((pr) =>
@@ -1260,7 +1348,11 @@ const CARDS = {
         const doneTargets = active.flatMap((pr) =>
           pr.targets.filter((t) => t.active && t.percentComplete >= 100),
         );
-        summaryLine.textContent = `${openTargets.length} target${openTargets.length === 1 ? "" : "s"} in progress · ${fmt.duration(openTargets.reduce((s, t) => s + (t.remainingSeconds || 0), 0)) || "0m"} of exposures left · ${doneTargets.length} complete`;
+        const left = openTargets.reduce(
+          (s, t) => s + (t.remainingSeconds || 0),
+          0,
+        );
+        summaryLine.textContent = `${openTargets.length} target${openTargets.length === 1 ? "" : "s"} in progress · ${fmt.long(left) || "0m"} of exposures left · ${doneTargets.length} complete`;
 
         if (!projects.length) {
           container.replaceChildren(
@@ -1274,21 +1366,30 @@ const CARDS = {
           return;
         }
         container.replaceChildren(
-          ...projects.map((pr) =>
-            el(
+          ...projects.map((pr) => {
+            const hasRunning = pr.visible.some(
+              (t) => `${pr.name}|${t.name}` === runningKey,
+            );
+            // A project with a single target reads better as one row.
+            if (pr.targets.length === 1 && pr.visible.length === 1)
+              return el(
+                "section",
+                { class: `ts-project single${hasRunning ? " running" : ""}` },
+                targetBlock({ ...pr.visible[0], projectName: pr.name }, pr),
+              );
+            return el(
               "section",
-              { class: "ts-project" },
+              { class: `ts-project${hasRunning ? " running" : ""}` },
               el(
                 "header",
                 null,
                 el("strong", { text: pr.name }),
-                el("span", {
-                  class: `pill ${pr.state === "Active" ? "ok" : ""}`,
-                  text: pr.state,
-                }),
+                pr.state !== "Active"
+                  ? el("span", { class: "pill", text: pr.state })
+                  : null,
                 el("span", {
                   class: "muted small",
-                  text: `priority ${pr.priority}`,
+                  text: priorityLabel(pr.priority),
                 }),
                 bar(pr.percentComplete ?? 0),
                 el("span", {
@@ -1296,34 +1397,49 @@ const CARDS = {
                   text:
                     pr.percentComplete == null
                       ? "no exposures planned"
-                      : `${fmt.num(pr.percentComplete, 0)}% · ${pr.remainingSeconds > 0 ? `${fmt.duration(pr.remainingSeconds)} left` : "complete"}`,
+                      : `${fmt.num(pr.percentComplete, 0)}% · ${pr.remainingSeconds > 0 ? `${fmt.long(pr.remainingSeconds)} left` : "complete"}`,
                 }),
               ),
               ...(pr.visible.length
-                ? pr.visible.map(targetRow)
+                ? pr.visible.map((t) =>
+                    targetBlock({ ...t, projectName: pr.name }),
+                  )
                 : [
                     el("div", {
                       class: "muted small",
                       text: "No targets to show.",
                     }),
                   ]),
-            ),
-          ),
+            );
+          }),
         );
       };
-      for (const box of [showDone, showAll]) {
-        box.addEventListener("change", () => {
+
+      for (const ctl of [showDone, showAll, sortBy]) {
+        ctl.addEventListener("change", () => {
           localStorage.setItem(
             prefKey,
             JSON.stringify({
               done: showDone.checked,
               inactive: showAll.checked,
+              sort: sortBy.value,
             }),
           );
           withZone(feed, render);
         });
       }
       return (kind) => {
+        if (kind === "status") {
+          const ts = feed.status.scheduler;
+          const key =
+            ts?.enabled && ts.state === "imaging" && ts.target
+              ? `${ts.project}|${ts.target}`
+              : null;
+          if (key === runningKey) return;
+          runningKey = key;
+          render();
+          return;
+        }
         if (kind === "progress" || kind === "all") render();
       };
     },
@@ -1368,7 +1484,9 @@ const CARDS = {
       const finished = (s) => ["FINISHED", "SKIPPED", "DISABLED"].includes(s);
 
       const bar = (pct) => {
-        const fill = el("div", { class: "bar-fill" });
+        const fill = el("div", {
+          class: `bar-fill${pct >= 100 ? " done" : ""}`,
+        });
         fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
         return el("div", { class: "bar compact" }, fill);
       };
