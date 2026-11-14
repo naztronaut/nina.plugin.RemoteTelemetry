@@ -51,6 +51,8 @@ namespace Naztronomy.NINA.RemoteTelemetry {
         private readonly ImageTracker imageTracker;
         private readonly GuideTracker guideTracker;
         private readonly TargetSchedulerTracker schedulerTracker;
+        private readonly AllSkyService allSky;
+        private string allSkyStatus = string.Empty;
         private readonly TelemetryApi api;
         private MiniHttpServer server;
         private string serverStatus = "Stopped";
@@ -97,16 +99,20 @@ namespace Naztronomy.NINA.RemoteTelemetry {
                 Switch = switchMediator,
             }, imageTracker, logTracker, schedulerTracker.GetNow);
 
-            api = new TelemetryApi(collector, imageTracker, logTracker, guideTracker, schedulerTracker, () => GuiderPixelScale(guiderMediator), () => ApiKey, () => AllowedOrigins);
+            api = new TelemetryApi(collector, imageTracker, logTracker, guideTracker, schedulerTracker, allSky = new AllSkyService(() => AllSkySource), () => GuiderPixelScale(guiderMediator), () => ApiKey, () => AllowedOrigins);
 
             RestartServerCommand = new RelayCommand(RestartServer);
             GenerateApiKeyCommand = new RelayCommand(() => ApiKey = NewApiKey());
             OpenDashboardCommand = new RelayCommand(OpenDashboard);
+            BrowseAllSkyFileCommand = new RelayCommand(BrowseAllSkyFile);
+            BrowseAllSkyFolderCommand = new RelayCommand(BrowseAllSkyFolder);
+            TestAllSkyCommand = new RelayCommand(() => _ = CheckAllSkyAsync());
 
             profileService.ProfileChanged += ProfileService_ProfileChanged;
 
             logTracker.Start();
             schedulerTracker.Start();
+            _ = CheckAllSkyAsync();
             RestartServer();
         }
 
@@ -129,6 +135,8 @@ namespace Naztronomy.NINA.RemoteTelemetry {
             RaisePropertyChanged(nameof(TargetSchedulerEnabled));
             RaisePropertyChanged(nameof(TargetSchedulerPort));
             RaisePropertyChanged(nameof(TargetSchedulerStatus));
+            RaisePropertyChanged(nameof(AllSkySource));
+            _ = CheckAllSkyAsync();
             RestartServer();
         }
 
@@ -168,6 +176,67 @@ namespace Naztronomy.NINA.RemoteTelemetry {
         }
 
         public string TargetSchedulerStatus => schedulerTracker?.StatusText ?? string.Empty;
+
+        public ICommand BrowseAllSkyFileCommand { get; }
+        public ICommand BrowseAllSkyFolderCommand { get; }
+        public ICommand TestAllSkyCommand { get; }
+
+        /// <summary>All-sky image source: an image file, a folder (newest image is used) or an http(s) URL.</summary>
+        public string AllSkySource {
+            get => settings.GetValueString(nameof(AllSkySource), string.Empty);
+            set {
+                settings.SetValueString(nameof(AllSkySource), value?.Trim().Trim('"') ?? string.Empty);
+                RaisePropertyChanged();
+                _ = CheckAllSkyAsync();
+            }
+        }
+
+        public string AllSkyStatus {
+            get => allSkyStatus;
+            private set {
+                allSkyStatus = value;
+                RaisePropertyChanged();
+            }
+        }
+
+        private async Task CheckAllSkyAsync() {
+            if (allSky == null) {
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(AllSkySource)) {
+                AllSkyStatus = "Not configured";
+                return;
+            }
+            AllSkyStatus = "Checking…";
+            try {
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(30));
+                var info = await allSky.GetInfoAsync(force: true, cts.Token);
+                AllSkyStatus = info.Error != null
+                    ? $"Problem: {info.Error}"
+                    : info.ImageId != null
+                        ? $"OK: {info.FileName} ({info.SizeBytes / 1024} KB, {info.ImageTimeUtc?.ToLocalTime():g})"
+                        : "No image found";
+            } catch (Exception ex) {
+                AllSkyStatus = $"Problem: {ex.Message}";
+            }
+        }
+
+        private void BrowseAllSkyFile() {
+            var dialog = new Microsoft.Win32.OpenFileDialog {
+                Title = "Select the all-sky image file",
+                Filter = "Images (*.jpg;*.jpeg;*.png;*.webp;*.gif)|*.jpg;*.jpeg;*.png;*.webp;*.gif",
+            };
+            if (dialog.ShowDialog() == true) {
+                AllSkySource = dialog.FileName;
+            }
+        }
+
+        private void BrowseAllSkyFolder() {
+            var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "Select the folder the all-sky camera saves images to" };
+            if (dialog.ShowDialog() == true) {
+                AllSkySource = dialog.FolderName;
+            }
+        }
 
         public int ServerPort {
             get => settings.GetValueInt32(nameof(ServerPort), DefaultPort);

@@ -1199,6 +1199,134 @@ const CARDS = {
     },
   },
 
+  allsky: {
+    title: "All-sky",
+    span: 2,
+    tall: true,
+    needs: [],
+    mount(body, feed, onDispose) {
+      const storeKey = `nina-remote-telemetry.allsky.${feed.dev.id}`;
+      const interval = el(
+        "select",
+        { "aria-label": "Update interval" },
+        ...[1, 5, 10, 15, 30, 60].map((m) =>
+          el("option", {
+            value: String(m),
+            text: m === 60 ? "every 1 h" : `every ${m} min`,
+          }),
+        ),
+      );
+      interval.value = localStorage.getItem(storeKey) || "30";
+      const btn = el("button", { type: "button" }, "Refresh");
+      const info = el("span", { class: "muted small" });
+      const err = el("div", { class: "error small" });
+      const img = el("img", { alt: "All-sky camera image", hidden: true });
+      const empty = el("div", { class: "muted", text: "Loading…" });
+      img.addEventListener("click", () => img.classList.toggle("zoom"));
+      img.addEventListener("load", () => {
+        img.hidden = false;
+        empty.hidden = true;
+      });
+      img.addEventListener("error", () => {
+        empty.hidden = false;
+        empty.textContent = "Image failed to load.";
+      });
+      body.append(
+        el("div", { class: "toolbar" }, interval, btn, info),
+        el("div", { class: "preview" }, img, empty),
+        err,
+      );
+
+      let timer = null;
+      let nextAt = null;
+      let shownId = null;
+      let last = null;
+
+      const renderInfo = () => {
+        if (!last?.configured) {
+          info.textContent = "";
+          return;
+        }
+        info.textContent = [
+          last.imageTimeUtc
+            ? `Image from ${fmt.hm(last.imageTimeUtc)} (${fmt.ago(last.imageTimeUtc)})`
+            : null,
+          nextAt ? `next update ${fmt.hm(nextAt)}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+      };
+
+      const show = (data, force) => {
+        last = data;
+        if (!data.configured) {
+          img.hidden = true;
+          empty.hidden = false;
+          empty.textContent =
+            "No all-sky source set. Configure it in NINA → Options → Plugins → Remote Telemetry.";
+          err.textContent = "";
+          renderInfo();
+          return;
+        }
+        err.textContent = data.error ?? "";
+        if (!data.imageId) {
+          empty.hidden = false;
+          empty.textContent = "No image yet.";
+        } else if (force || data.imageId !== shownId) {
+          // New image id busts the cache when the picture changes; t forces a re-fetch on manual refresh.
+          const params = new URLSearchParams({
+            v: data.imageId,
+            t: String(Date.now()),
+          });
+          if (feed.dev.key) params.set("key", feed.dev.key);
+          img.src = `${feed.dev.url}/api/v1/allsky/image?${params}`;
+          shownId = data.imageId;
+        }
+        renderInfo();
+      };
+
+      const schedule = () => {
+        clearTimeout(timer);
+        const ms = Number(interval.value) * 60000;
+        nextAt = new Date(Date.now() + ms).toISOString();
+        timer = setTimeout(() => load(false), ms);
+      };
+
+      const load = async (force) => {
+        btn.disabled = true;
+        if (force) btn.textContent = "Refreshing…";
+        try {
+          const data = await api(
+            feed.dev,
+            force ? "/api/v1/allsky/refresh" : "/api/v1/allsky",
+            35000,
+            force ? "POST" : "GET",
+          );
+          schedule();
+          show(data, force);
+        } catch (e) {
+          schedule();
+          err.textContent = `Couldn't load the all-sky image: ${e.message}`;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Refresh";
+        }
+      };
+
+      btn.addEventListener("click", () => load(true));
+      interval.addEventListener("change", () => {
+        localStorage.setItem(storeKey, interval.value);
+        schedule();
+        renderInfo();
+      });
+      onDispose(() => clearTimeout(timer));
+      load(false);
+
+      // Status ticks only keep the "x min ago" text current.
+      return () => renderInfo();
+    },
+  },
+
   frame: {
     title: "Last frame",
     span: 2,

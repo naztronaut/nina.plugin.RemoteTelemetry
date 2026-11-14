@@ -71,6 +71,27 @@
                 <Button Margin="6,0,0,0" Padding="10,3" Content="Open dashboard" Command="{Binding OpenDashboardCommand}" />
             </StackPanel>
 
+            <TextBlock Margin="0,18,0,5" FontWeight="Bold" Text="All-sky camera" />
+            <TextBlock
+                Margin="0,0,0,8"
+                TextWrapping="Wrap"
+                Text="Image shown on the dashboard's All-sky card. Use the camera's 'latest' image file, the folder it saves to (the newest .jpg/.png/.webp/.gif is used), or an http(s) URL. Leave blank to disable." />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                <TextBox
+                    MinWidth="400"
+                    VerticalAlignment="Center"
+                    ToolTip="e.g. C:\allsky\latest.jpg, C:\allsky\images or http://allsky.local/image.jpg"
+                    Text="{Binding AllSkySource, UpdateSourceTrigger=LostFocus}" />
+                <Button Margin="6,0,0,0" Padding="10,3" VerticalAlignment="Center" Content="File…" Command="{Binding BrowseAllSkyFileCommand}" />
+                <Button Margin="6,0,0,0" Padding="10,3" VerticalAlignment="Center" Content="Folder…" Command="{Binding BrowseAllSkyFolderCommand}" />
+                <Button Margin="6,0,0,0" Padding="10,3" VerticalAlignment="Center" Content="Test" Command="{Binding TestAllSkyCommand}" />
+            </StackPanel>
+            <TextBlock
+                Margin="0,6,0,0"
+                FontStyle="Italic"
+                TextWrapping="Wrap"
+                Text="{Binding AllSkyStatus, StringFormat='Status: {0}'}" />
+
             <TextBlock Margin="0,18,0,5" FontWeight="Bold" Text="Target Scheduler" />
             <TextBlock
                 Margin="0,0,0,8"

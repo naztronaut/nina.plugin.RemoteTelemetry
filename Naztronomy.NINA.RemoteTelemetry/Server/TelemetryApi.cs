@@ -48,16 +48,18 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
         private readonly LogTracker logs;
         private readonly GuideTracker guiding;
         private readonly TargetSchedulerTracker scheduler;
+        private readonly AllSkyService allSky;
         private readonly Func<double?> guiderPixelScale;
         private readonly Func<string> apiKey;
         private readonly Func<string> allowedOrigins;
 
-        public TelemetryApi(TelemetryCollector collector, ImageTracker images, LogTracker logs, GuideTracker guiding, TargetSchedulerTracker scheduler, Func<double?> guiderPixelScale, Func<string> apiKey, Func<string> allowedOrigins) {
+        public TelemetryApi(TelemetryCollector collector, ImageTracker images, LogTracker logs, GuideTracker guiding, TargetSchedulerTracker scheduler, AllSkyService allSky, Func<double?> guiderPixelScale, Func<string> apiKey, Func<string> allowedOrigins) {
             this.collector = collector;
             this.images = images;
             this.logs = logs;
             this.guiding = guiding;
             this.scheduler = scheduler;
+            this.allSky = allSky;
             this.guiderPixelScale = guiderPixelScale;
             this.apiKey = apiKey;
             this.allowedOrigins = allowedOrigins;
@@ -83,10 +85,11 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
                 path = "/";
             }
 
-            // The only non-GET call: re-running the TS plan preview changes nothing in NINA.
-            var isPlanRefresh = path.Equals("/api/v1/scheduler/plan/refresh", StringComparison.OrdinalIgnoreCase);
-            if (isPlanRefresh ? req.Method != "POST" : req.Method != "GET" && req.Method != "HEAD") {
-                return Error(405, isPlanRefresh ? "Use POST." : "Only GET is supported.");
+            // The only non-GET calls just re-read data; nothing in NINA changes.
+            var isPost = path.Equals("/api/v1/scheduler/plan/refresh", StringComparison.OrdinalIgnoreCase)
+                || path.Equals("/api/v1/allsky/refresh", StringComparison.OrdinalIgnoreCase);
+            if (isPost ? req.Method != "POST" : req.Method != "GET" && req.Method != "HEAD") {
+                return Error(405, isPost ? "Use POST." : "Only GET is supported.");
             }
 
             if (StaticFiles.TryGetValue(path, out var file)) {
@@ -170,6 +173,24 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
 
                 case "/api/v1/scheduler/progress":
                     return Json(scheduler.GetProgress());
+
+                case "/api/v1/allsky":
+                case "/api/v1/allsky/refresh":
+                    using (var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(30))) {
+                        return Json(await allSky.GetInfoAsync(force: req.Method == "POST", cts.Token).ConfigureAwait(false));
+                    }
+
+                case "/api/v1/allsky/image":
+                    using (var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(30))) {
+                        var (skyBytes, skyType, skyId) = await allSky.GetImageAsync(cts.Token).ConfigureAwait(false);
+                        if (skyBytes == null) {
+                            return Error(404, "No all-sky image available.");
+                        }
+                        var sky = new HttpResponse { ContentType = skyType, Body = skyBytes };
+                        sky.Headers["Cache-Control"] = "no-store";
+                        sky.Headers["X-Image-Id"] = skyId;
+                        return sky;
+                    }
             }
 
             const string statsPrefix = "/api/v1/scheduler/targets/";

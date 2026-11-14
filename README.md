@@ -66,6 +66,9 @@ All responses are JSON (camelCase, UTC timestamps, `null` for unavailable values
 | `POST /api/v1/scheduler/plan/refresh`              | Re-run the preview now (15 s cooldown). Changes nothing in NINA                                                                                                                                |
 | `GET /api/v1/scheduler/progress`                   | Projects → targets → per-filter desired / acquired / accepted, remaining count and exposure time                                                                                               |
 | `GET /api/v1/scheduler/targets/{id}/statistics`    | HFR / FWHM / eccentricity per filter for a target                                                                                                                                              |
+| `GET /api/v1/allsky`                               | Latest all-sky image metadata (`imageId`, file name, time, error)                                                                                                                              |
+| `POST /api/v1/allsky/refresh`                      | Re-read the all-sky source now                                                                                                                                                                 |
+| `GET /api/v1/allsky/image?v=<imageId>&t=<now>`     | The all-sky image (`v`/`t` are cache busters)                                                                                                                                                  |
 
 ### Target Scheduler
 

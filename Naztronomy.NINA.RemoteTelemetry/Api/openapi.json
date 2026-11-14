@@ -36,6 +36,10 @@
     {
       "name": "Target Scheduler",
       "description": "Requires the Target Scheduler plugin with its API enabled. Data is read from TS on the NINA machine and cached by this plugin."
+    },
+    {
+      "name": "All-sky",
+      "description": "Latest image from an all-sky camera. The source (file, folder or URL) is set in the plugin options in NINA."
     }
   ],
   "paths": {
@@ -486,6 +490,90 @@
               }
             }
           }
+        }
+      }
+    },
+    "/api/v1/allsky": {
+      "get": {
+        "tags": ["All-sky"],
+        "summary": "Metadata of the latest all-sky image",
+        "description": "The source is re-checked at most every 20 seconds. Use `imageId` to build a cache-busting image URL.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AllSky" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/allsky/refresh": {
+      "post": {
+        "tags": ["All-sky"],
+        "summary": "Re-read the all-sky source now",
+        "description": "Bypasses the 20-second re-check window (3-second cooldown). Changes nothing in NINA.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AllSky" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/allsky/image": {
+      "get": {
+        "tags": ["All-sky"],
+        "summary": "The latest all-sky image",
+        "description": "Sent with `Cache-Control: no-store`. Add `?v=<imageId>&t=<now>` so browsers fetch a fresh copy; use `key` when loading from an `<img>` tag.",
+        "parameters": [
+          {
+            "name": "v",
+            "in": "query",
+            "description": "Cache buster (image id); ignored by the server",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "description": "Cache buster (timestamp); ignored by the server",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Image bytes",
+            "headers": {
+              "X-Image-Id": {
+                "description": "Content hash of the image",
+                "schema": { "type": "string" }
+              }
+            },
+            "content": {
+              "image/jpeg": {
+                "schema": { "type": "string", "format": "binary" }
+              },
+              "image/png": {
+                "schema": { "type": "string", "format": "binary" }
+              },
+              "image/webp": {
+                "schema": { "type": "string", "format": "binary" }
+              },
+              "image/gif": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     }
@@ -1100,6 +1188,40 @@
             "type": "array",
             "description": "Unix ms timestamps of completed dithers",
             "items": { "type": "integer", "format": "int64" }
+          }
+        }
+      },
+      "AllSky": {
+        "type": "object",
+        "properties": {
+          "configured": { "type": "boolean" },
+          "sourceType": {
+            "type": "string",
+            "enum": ["none", "file", "folder", "url"]
+          },
+          "imageId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Short content hash; changes when the image changes"
+          },
+          "fileName": { "type": "string", "nullable": true },
+          "imageTimeUtc": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "File modified time (or Last-Modified for URLs)"
+          },
+          "checkedUtc": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "sizeBytes": { "type": "integer", "nullable": true },
+          "contentType": { "type": "string", "nullable": true },
+          "error": {
+            "type": "string",
+            "nullable": true,
+            "description": "Last problem; the previous good image is kept"
           }
         }
       },
