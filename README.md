@@ -73,3 +73,45 @@ Invoke-RestMethod http://astro-pc:8787/api/v1/status -Headers @{ 'X-Api-Key' = '
 - Intended for a trusted private network such as Tailscale. **Do not port-forward it to the internet.**
 - The API is read-only, but it exposes log content and file names. Set an API key if others share the network.
 - Requests are limited to 16 KB headers, 10 s, and 32 concurrent connections. Static files are served only from an embedded allow-list.
+-
+
+## Authors
+
+- **Nazmus Nasir** - [Naztronomy](https://www.naztronomy.com)
+
+### Social Media & Support:
+
+- **YouTube** - [YouTube.com/Naztronomy](https://www.youtube.com/naztronomy)
+- **Patreon** - [Become a Patron](https://www.patreon.com/c/naztronomy)
+- **Buy Me a Coffee** - [Become a Supporter](https://www.buymeacoffee.com/naztronomy)
+- **Discord** - [Join our Online community](https://discord.gg/yXKqrawpjr)
+- **Bluesky** - [Bluesky/Naztronomy.com](https://bsky.app/profile/naztronomy.com)
+- **Instagram** - [IG/Naztronomy](https://instagram.com/naztronomy)
+
+## Support the Project
+
+If these scripts have been useful to you, consider supporting the project — it helps fund continued development and new features:
+
+- **Patreon** — [patreon.com/c/naztronomy](https://www.patreon.com/c/naztronomy)
+- **Buy Me a Coffee** — [buymeacoffee.com/naztronomy](https://www.buymeacoffee.com/naztronomy)
+- **YouTube Memberships** — [youtube.com/naztronomy/join](https://www.youtube.com/naztronomy/join)
+- **GitHub Sponsors** — [github.com/sponsors/naztronomy](https://github.com/sponsors/naztronaut)
+
+## Support & Questions
+
+Have questions? You can reach out through several channels:
+
+- Create an issue in the [issues forum](/../../issues)
+- Join our [Discord community](https://discord.gg/yXKqrawpjr)
+- Comment on the demo videos on YouTube
+- Check the help sections within each script
+
+## Contributing
+
+Pull requests are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines. Key points:
+
+- **All pull requests must target the `develop` branch** — do not open PRs against `main` directly
+- **New features must be non-breaking** — all existing functionality must continue to work as expected
+- Test your changes thoroughly before submitting
+- Follow the existing code style and update documentation as needed
+- Bug fixes and new features will be reviewed before merging
