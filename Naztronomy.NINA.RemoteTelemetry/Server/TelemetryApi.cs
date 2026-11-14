@@ -143,7 +143,7 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
                     long.TryParse(req.QueryValue("after"), out var after);
                     return Json(new {
                         file = Path.GetFileName(logs.CurrentFile ?? string.Empty),
-                        entries = logs.GetEntries(req.QueryInt("limit", 200, 1, 2000), minLevel, after),
+                        entries = logs.GetEntries(req.QueryInt("limit", 200, 1, 5000), minLevel, after),
                     });
 
                 case "/api/v1/issues":
