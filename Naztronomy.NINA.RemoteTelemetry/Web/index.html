@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>NINA Remote Telemetry</title>
+    <title>N.I.N.A. Remote Telemetry</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="styles.css" />
   </head>
@@ -11,7 +11,7 @@
     <header class="topbar">
       <div class="brand">
         <img src="favicon.svg" alt="" width="24" height="24" />
-        <span>Remote Telemetry</span>
+        <span>N.I.N.A. Remote Telemetry</span>
       </div>
       <select id="viewSelect" aria-label="View"></select>
       <nav id="deviceChips" class="chips" aria-label="NINA devices"></nav>
@@ -39,8 +39,8 @@
       <h1>No NINA devices yet</h1>
       <p>
         Add a NINA instance running the Remote Telemetry plugin, e.g.
-        <code>http://100.64.0.12:8787</code> or
-        <code>http://astro-pc:8787</code>.
+        <code>http://100.xx.x.xx:8787</code> or
+        <code>http://hostname:8787</code>.
       </p>
       <button id="emptyAddBtn" type="button" class="primary">Add device</button>
     </main>
@@ -57,7 +57,7 @@
             >Name <input id="newName" placeholder="Observatory" maxlength="60"
           /></label>
           <label
-            >Address <input id="newUrl" placeholder="http://100.64.0.12:8787"
+            >Address <input id="newUrl" placeholder="http://100.xx.x.xx:8787"
           /></label>
           <label
             >API key

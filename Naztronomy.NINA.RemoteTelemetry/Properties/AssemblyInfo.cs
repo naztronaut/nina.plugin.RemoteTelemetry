@@ -26,7 +26,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyDescription("Exposes a read-only JSON web API and dashboard with live NINA telemetry: devices, weather, safety, sequence, last image preview, logs and errors.")]
 
 [assembly: AssemblyCompany("Naztronomy")]
-[assembly: AssemblyProduct("Remote Telemetry")]
+[assembly: AssemblyProduct("N.I.N.A.Remote Telemetry")]
 [assembly: AssemblyCopyright("Copyright © 2026 Naztronomy")]
 
 // [MANDATORY] The minimum version of N.I.N.A. that this plugin is compatible with.
@@ -34,10 +34,10 @@ using System.Runtime.InteropServices;
 
 [assembly: AssemblyMetadata("License", "MPL-2.0")]
 [assembly: AssemblyMetadata("LicenseURL", "https://www.mozilla.org/en-US/MPL/2.0/")]
-[assembly: AssemblyMetadata("Repository", "https://github.com/Naztronaut/NINA-Remote-Telemetry")]
+[assembly: AssemblyMetadata("Repository", "https://github.com/naztronaut/nina.plugin.RemoteTelemetry")]
 [assembly: AssemblyMetadata("Homepage", "https://www.naztronomy.com/")]
 [assembly: AssemblyMetadata("Tags", "Telemetry,Remote,Dashboard,API,Monitoring")]
-[assembly: AssemblyMetadata("ChangelogURL", "https://github.com/Naztronaut/NINA-Remote-Telemetry/blob/main/CHANGELOG.md")]
+[assembly: AssemblyMetadata("ChangelogURL", "https://github.com/naztronaut/nina.plugin.RemoteTelemetry/blob/main/CHANGELOG.md")]
 [assembly: AssemblyMetadata("FeaturedImageURL", "")]
 [assembly: AssemblyMetadata("ScreenshotURL", "")]
 [assembly: AssemblyMetadata("AltScreenshotURL", "")]
