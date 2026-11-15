@@ -38,9 +38,9 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyMetadata("Homepage", "https://www.naztronomy.com/")]
 [assembly: AssemblyMetadata("Tags", "Telemetry,Remote,Dashboard,API,Monitoring")]
 [assembly: AssemblyMetadata("ChangelogURL", "https://github.com/naztronaut/nina.plugin.RemoteTelemetry/blob/main/CHANGELOG.md")]
-[assembly: AssemblyMetadata("FeaturedImageURL", "")]
-[assembly: AssemblyMetadata("ScreenshotURL", "")]
-[assembly: AssemblyMetadata("AltScreenshotURL", "")]
+[assembly: AssemblyMetadata("FeaturedImageURL", "https://raw.githubusercontent.com/naztronaut/nina.plugin.RemoteTelemetry/refs/heads/main/assets/featured_image.png")]
+[assembly: AssemblyMetadata("ScreenshotURL", "https://raw.githubusercontent.com/naztronaut/nina.plugin.RemoteTelemetry/refs/heads/main/assets/screenshot.png")]
+[assembly: AssemblyMetadata("AltScreenshotURL", "https://raw.githubusercontent.com/naztronaut/nina.plugin.RemoteTelemetry/refs/heads/main/assets/altscreenshot.png")]
 [assembly: AssemblyMetadata("LongDescription", @"Remote Telemetry runs a small, read-only HTTP server inside N.I.N.A. that publishes live session telemetry as JSON:
 
 * Connected equipment (camera, mount, focuser, filter wheel, rotator, guider, dome, flat panel, switches)
