@@ -747,7 +747,7 @@ td.wrap {
 .ts-target {
   padding: 6px 0;
 }
-.ts-target.running {
+.ts-target.now {
   background: linear-gradient(90deg, #a73cf522, transparent 60%);
 }
 .ts-target-head {
@@ -783,9 +783,31 @@ td.wrap {
 @media (max-width: 640px) {
   .ts-target-head {
     flex-wrap: wrap;
+    row-gap: 6px;
   }
   .ts-target-head strong {
-    flex-basis: 100%;
+    flex: 1 1 100%;
+    white-space: normal;
+  }
+  .ts-target-head .bar.compact,
+  .ts-project > header .bar.compact {
+    flex: 1 1 80px;
+  }
+  /* Remaining filters get their own full line instead of being cut to "H…". */
+  .ts-target-head .ts-remaining {
+    order: 10;
+    flex: 1 1 100%;
+    white-space: normal;
+    overflow: visible;
+  }
+  .ts-project > header {
+    row-gap: 6px;
+  }
+  .ts-details {
+    margin-left: 0;
+  }
+  .ts-filters {
+    min-width: 560px;
   }
 }
 
@@ -817,13 +839,93 @@ td.wrap {
 .ts-project.single .ts-target {
   border-top: none;
 }
-.ts-project.running {
+.ts-project.now {
   border-color: var(--accent);
   box-shadow: var(--glow);
 }
-.ts-target.running .ts-target-head strong {
+.ts-target.now .ts-target-head strong {
   color: #e3c6ff;
 }
 .ts-details {
   overflow-x: auto;
+}
+/* Flex/grid children default to min-width:auto, which let wide tables push past the card edge. */
+.ts-project,
+.ts-target,
+.ts-details {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 640px) {
+  .topbar {
+    gap: 8px;
+    padding: 8px 10px;
+  }
+  .brand span {
+    font-size: 13px;
+    letter-spacing: 0.12em;
+  }
+  #viewSelect {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .chips {
+    order: 5;
+    flex: 1 1 100%;
+  }
+  .actions {
+    flex-wrap: wrap;
+  }
+  .toolbar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .toolbar label,
+  .toolbar button {
+    white-space: nowrap;
+  }
+}
+
+/* ---------- Switches tile ---------- */
+.device.wide {
+  grid-column: 1 / -1;
+}
+.swt-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 4px 16px;
+}
+.swt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  padding: 2px 0;
+  border-bottom: 1px solid #ffffff08;
+}
+.swt-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.swt-num {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.swt-row .pill {
+  flex: none;
+  padding: 1px 8px;
+  font-size: 11px;
+}
+.swt-head {
+  margin: 8px 0 2px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
 }

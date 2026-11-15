@@ -602,12 +602,69 @@ const DEVICE_VIEWS = {
   ],
   weather: ["Weather", () => []],
   safetyMonitor: ["Safety", (d) => [["Status", d.isSafe ? "Safe" : "Unsafe"]]],
-  switch: [
-    "Switches",
-    (d) =>
-      (d.switches || []).slice(0, 8).map((s) => [s.name, fmt.num(s.value, 2)]),
-  ],
+  switch: ["Switches", () => [], (d) => renderSwitches(d.switches || [])],
 };
+
+// Drivers often name ports "Description: Label"; the part after the colon is the user's label.
+const switchLabel = (s) => {
+  const name = s.name || `Switch ${s.id}`;
+  const i = name.lastIndexOf(": ");
+  return i > 0 && i < name.length - 2 ? name.slice(i + 2) : name;
+};
+
+const isToggle = (s) =>
+  s.writable &&
+  s.minimum === 0 &&
+  s.maximum === 1 &&
+  (s.step == null || s.step === 1);
+
+const switchValue = (v) =>
+  v == null
+    ? "—"
+    : Number.isInteger(v)
+      ? String(v)
+      : String(Number(v.toFixed(2)));
+
+function renderSwitches(switches) {
+  const row = (s) => {
+    const tip = [
+      s.name,
+      s.description,
+      s.writable && !isToggle(s) && s.maximum != null
+        ? `range ${switchValue(s.minimum)}–${switchValue(s.maximum)}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const value = isToggle(s)
+      ? el("span", {
+          class: `pill ${s.value >= 1 ? "ok" : ""}`,
+          text: s.value >= 1 ? "On" : "Off",
+        })
+      : el("span", { class: "swt-num", text: switchValue(s.value) });
+    return el(
+      "div",
+      { class: "swt-row", title: tip },
+      el("span", { class: "swt-label", text: switchLabel(s) }),
+      value,
+    );
+  };
+  const outputs = switches.filter((s) => s.writable);
+  const sensors = switches.filter((s) => !s.writable);
+  if (!switches.length)
+    return el("div", { class: "muted small", text: "No switches reported." });
+  return el(
+    "div",
+    null,
+    outputs.length
+      ? el("div", { class: "swt-grid" }, ...outputs.map(row))
+      : null,
+    sensors.length ? el("div", { class: "swt-head", text: "Sensors" }) : null,
+    sensors.length
+      ? el("div", { class: "swt-grid" }, ...sensors.map(row))
+      : null,
+  );
+}
 
 function withZone(feed, fn) {
   const prev = currentTz;
@@ -1237,7 +1294,7 @@ const CARDS = {
         return el(
           "div",
           {
-            class: `ts-target${t.active ? "" : " off"}${running ? " running" : ""}`,
+            class: `ts-target${t.active ? "" : " off"}${running ? " now" : ""}`,
           },
           el(
             "div",
@@ -1374,12 +1431,12 @@ const CARDS = {
             if (pr.targets.length === 1 && pr.visible.length === 1)
               return el(
                 "section",
-                { class: `ts-project single${hasRunning ? " running" : ""}` },
+                { class: `ts-project single${hasRunning ? " now" : ""}` },
                 targetBlock({ ...pr.visible[0], projectName: pr.name }, pr),
               );
             return el(
               "section",
-              { class: `ts-project${hasRunning ? " running" : ""}` },
+              { class: `ts-project${hasRunning ? " now" : ""}` },
               el(
                 "header",
                 null,
@@ -1601,7 +1658,7 @@ const CARDS = {
         return el(
           "div",
           {
-            class: `ts-target${t.status === "RUNNING" ? " running" : ""}${finished(t.status) ? " off" : ""}`,
+            class: `ts-target${t.status === "RUNNING" ? " now" : ""}${finished(t.status) ? " off" : ""}`,
           },
           el(
             "div",
@@ -1880,13 +1937,15 @@ const CARDS = {
         grid.replaceChildren(
           ...Object.entries(DEVICE_VIEWS)
             .filter(([k]) => eq[k])
-            .map(([k, [label, rows]]) => {
+            .map(([k, [label, rows, render]]) => {
               const d = eq[k];
               const dl = el("dl", { class: "kv" });
               if (d.connected) kv(dl, rows(d));
               return el(
                 "div",
-                { class: `device${d.connected ? "" : " off"}` },
+                {
+                  class: `device${d.connected ? "" : " off"}${render && d.connected ? " wide" : ""}`,
+                },
                 el(
                   "header",
                   null,
@@ -1898,7 +1957,7 @@ const CARDS = {
                   { class: "name", title: d.name || "" },
                   d.connected ? d.name : "Not connected",
                 ),
-                dl,
+                render && d.connected ? render(d) : dl,
               );
             }),
         );

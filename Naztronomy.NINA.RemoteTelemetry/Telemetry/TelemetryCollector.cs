@@ -226,8 +226,26 @@ namespace Naztronomy.NINA.RemoteTelemetry.Telemetry {
                 d["isSafe"] = i.IsSafe;
             }),
             ["switch"] = Device(() => s.Switch.GetInfo(), (i, d) => {
-                var writable = i.WritableSwitches?.Select(x => new { id = x.Id, name = x.Name, value = Num.N(x.Value), writable = true }) ?? Enumerable.Empty<object>();
-                var readOnly = i.ReadonlySwitches?.Select(x => new { id = x.Id, name = x.Name, value = Num.N(x.Value), writable = false }) ?? Enumerable.Empty<object>();
+                var writable = i.WritableSwitches?.Select(x => new {
+                    id = x.Id,
+                    name = x.Name,
+                    description = x.Description,
+                    value = Num.N(x.Value),
+                    writable = true,
+                    minimum = Num.N(x.Minimum),
+                    maximum = Num.N(x.Maximum),
+                    step = Num.N(x.StepSize),
+                }) ?? Enumerable.Empty<object>();
+                var readOnly = i.ReadonlySwitches?.Select(x => new {
+                    id = x.Id,
+                    name = x.Name,
+                    description = x.Description,
+                    value = Num.N(x.Value),
+                    writable = false,
+                    minimum = (double?)null,
+                    maximum = (double?)null,
+                    step = (double?)null,
+                }) ?? Enumerable.Empty<object>();
                 d["switches"] = writable.Cast<object>().Concat(readOnly).ToList();
             }),
         };
