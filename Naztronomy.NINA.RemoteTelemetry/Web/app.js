@@ -1606,7 +1606,43 @@ const CARDS = {
           ),
         );
 
+      const schedulerRow = (t) => {
+        const ts = feed.status?.scheduler;
+        const running = t.status === "RUNNING";
+        let text = "Targets are picked by Target Scheduler at run time.";
+        if (running && ts?.enabled && ts.state === "imaging" && ts.target) {
+          text = `Imaging ${ts.target}${ts.project ? ` (${ts.project})` : ""}`;
+        } else if (running && ts?.enabled && ts.state === "waiting") {
+          text = ts.waitUntilUtc
+            ? `Waiting${ts.target ? ` for ${ts.target}` : ""} until ${fmt.hm(ts.waitUntilUtc)}`
+            : "Waiting for the next target";
+        }
+        const hint = tsAvailable(feed)
+          ? "Plan and progress are on the Target Scheduler tab."
+          : null;
+        return el(
+          "div",
+          {
+            class: `ts-target${running ? " now" : ""}${finished(t.status) ? " off" : ""}`,
+          },
+          el(
+            "div",
+            { class: "ts-target-head" },
+            el("span", {
+              class: "seq-icon",
+              text: ICONS[t.status] ?? "•",
+              title: t.status,
+            }),
+            el("strong", { text: t.name || "Target Scheduler" }),
+            el("span", { class: "pill", text: "Target Scheduler" }),
+            el("span", { class: "small ts-remaining", text, title: text }),
+          ),
+          hint ? el("div", { class: "muted small", text: hint }) : null,
+        );
+      };
+
       const targetRow = (t, i) => {
+        if (t.scheduler) return schedulerRow(t);
         const key = `${i}:${t.name}`;
         const open = expanded.has(key);
         const total = (t.imagedSeconds || 0) + (t.remainingSeconds || 0);
@@ -1700,8 +1736,12 @@ const CARDS = {
           );
           return;
         }
-        const pending = targets.filter((t) => !finished(t.status)).length;
-        summary.textContent = `${s.isRunning ? "Sequence running" : "Sequence idle"} · ${targets.length} targets (${pending} to go) · ${fmt.duration(s.imagedSeconds) || "0m"} imaged · ~${fmt.duration(s.remainingSeconds) || "0m"} left${s.openEnded ? " + open-ended blocks" : ""}`;
+        const fixed = targets.filter((t) => !t.scheduler);
+        const pending = fixed.filter((t) => !finished(t.status)).length;
+        const state = s.isRunning ? "Sequence running" : "Sequence idle";
+        summary.textContent = fixed.length
+          ? `${state} · ${fixed.length} targets (${pending} to go) · ${fmt.duration(s.imagedSeconds) || "0m"} imaged · ~${fmt.duration(s.remainingSeconds) || "0m"} left${s.openEnded ? " + open-ended blocks" : ""}${fixed.length < targets.length ? " · plus Target Scheduler" : ""}`
+          : `${state} · targets chosen by Target Scheduler`;
         const shown = targets
           .map((t, i) => [t, i])
           .filter(([t]) => showDone.checked || !finished(t.status));
@@ -1725,6 +1765,11 @@ const CARDS = {
       });
       return (kind) => {
         if (kind === "seqTargets" || kind === "all") render();
+        else if (
+          kind === "status" &&
+          feed.seqTargets?.targets?.some((t) => t.scheduler)
+        )
+          render();
       };
     },
   },

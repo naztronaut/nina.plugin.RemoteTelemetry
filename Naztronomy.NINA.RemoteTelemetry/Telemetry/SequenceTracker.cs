@@ -102,6 +102,15 @@ namespace Naztronomy.NINA.RemoteTelemetry.Telemetry {
 
             foreach (var container in containers) {
                 try {
+                    if (IsTargetScheduler(container)) {
+                        targets.Add(new {
+                            name = container.Name,
+                            status = container.Status.ToString(),
+                            scheduler = true,
+                        });
+                        continue;
+                    }
+
                     var blocks = new List<Block>();
                     Walk(container, null, blocks, 0);
 
@@ -206,6 +215,12 @@ namespace Naztronomy.NINA.RemoteTelemetry.Telemetry {
                         break;
                 }
             }
+        }
+
+        // Target Scheduler picks targets and exposures at run time, so its container has no static plan to read.
+        private static bool IsTargetScheduler(object container) {
+            var type = container?.GetType();
+            return type != null && ((type.FullName ?? "").Contains("TargetScheduler") || type.Name == "TargetSchedulerContainer");
         }
 
         private static string NameOf(ISequenceItem item) => !string.IsNullOrWhiteSpace(item.Name) ? item.Name : item switch {
