@@ -99,7 +99,7 @@ namespace Naztronomy.NINA.RemoteTelemetry {
                 Switch = switchMediator,
             }, imageTracker, logTracker, schedulerTracker.GetNow);
 
-            api = new TelemetryApi(collector, imageTracker, logTracker, guideTracker, schedulerTracker, allSky = new AllSkyService(() => AllSkySource), new SequenceTracker(sequenceMediator), () => GuiderPixelScale(guiderMediator), () => ApiKey, () => AllowedOrigins);
+            api = new TelemetryApi(collector, imageTracker, logTracker, guideTracker, schedulerTracker, allSky = new AllSkyService(() => AllSkySource), new SequenceTracker(sequenceMediator), new AutoFocusTracker(), () => GuiderPixelScale(guiderMediator), () => ApiKey, () => AllowedOrigins);
 
             RestartServerCommand = new RelayCommand(RestartServer);
             GenerateApiKeyCommand = new RelayCommand(() => ApiKey = NewApiKey());

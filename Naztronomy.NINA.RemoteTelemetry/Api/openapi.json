@@ -609,6 +609,142 @@
         }
       }
     },
+    "/api/v1/autofocus": {
+      "get": {
+        "tags": ["Autofocus"],
+        "summary": "Latest autofocus run and recent focus positions",
+        "description": "Read from the JSON reports NINA writes to %LOCALAPPDATA%\\NINA\\AutoFocus after each successful autofocus run. Cached for 10 seconds.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": { "type": "boolean" },
+                    "error": { "type": "string", "nullable": true },
+                    "latest": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "Report file name"
+                        },
+                        "timestampUtc": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "filter": { "type": "string", "nullable": true },
+                        "autoFocuser": { "type": "string", "nullable": true },
+                        "starDetector": { "type": "string", "nullable": true },
+                        "method": {
+                          "type": "string",
+                          "nullable": true,
+                          "example": "STARHFR"
+                        },
+                        "fitting": {
+                          "type": "string",
+                          "nullable": true,
+                          "example": "HYPERBOLIC"
+                        },
+                        "temperature": { "type": "number", "nullable": true },
+                        "durationSeconds": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "initial": {
+                          "$ref": "#/components/schemas/FocusPoint"
+                        },
+                        "calculated": {
+                          "$ref": "#/components/schemas/FocusPoint"
+                        },
+                        "previous": {
+                          "$ref": "#/components/schemas/FocusPoint"
+                        },
+                        "points": {
+                          "type": "array",
+                          "items": { "$ref": "#/components/schemas/FocusPoint" }
+                        },
+                        "intersections": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "trendLine": {
+                              "$ref": "#/components/schemas/FocusPoint"
+                            },
+                            "hyperbolic": {
+                              "$ref": "#/components/schemas/FocusPoint"
+                            },
+                            "quadratic": {
+                              "$ref": "#/components/schemas/FocusPoint"
+                            },
+                            "gaussian": {
+                              "$ref": "#/components/schemas/FocusPoint"
+                            }
+                          }
+                        },
+                        "rSquares": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "quadratic": { "type": "number", "nullable": true },
+                            "hyperbolic": {
+                              "type": "number",
+                              "nullable": true
+                            },
+                            "leftTrend": { "type": "number", "nullable": true },
+                            "rightTrend": { "type": "number", "nullable": true }
+                          }
+                        },
+                        "fittings": {
+                          "type": "object",
+                          "nullable": true,
+                          "description": "Fitted curve expressions as written by NINA",
+                          "additionalProperties": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        },
+                        "backlash": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "model": { "type": "string", "nullable": true },
+                            "in": { "type": "number", "nullable": true },
+                            "out": { "type": "number", "nullable": true }
+                          }
+                        }
+                      }
+                    },
+                    "recent": {
+                      "type": "array",
+                      "description": "Up to 10 most recent runs, newest first",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "timestampUtc": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "filter": { "type": "string", "nullable": true },
+                          "temperature": { "type": "number", "nullable": true },
+                          "position": { "type": "number", "nullable": true },
+                          "value": { "type": "number", "nullable": true }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
     "/api/v1/allsky": {
       "get": {
         "tags": ["All-sky"],
@@ -1331,6 +1467,19 @@
             "description": "Unix ms timestamps of completed dithers",
             "items": { "type": "integer", "format": "int64" }
           }
+        }
+      },
+      "FocusPoint": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "position": { "type": "number" },
+          "value": {
+            "type": "number",
+            "nullable": true,
+            "description": "HFR (or contrast for contrast detection)"
+          },
+          "error": { "type": "number", "nullable": true }
         }
       },
       "AllSky": {

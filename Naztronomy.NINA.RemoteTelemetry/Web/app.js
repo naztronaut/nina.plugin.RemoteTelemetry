@@ -232,6 +232,7 @@ class Feed {
     this.plan = null;
     this.progress = null;
     this.seqTargets = null;
+    this.autofocus = null;
     this.lastImageId = undefined;
     this.lastIssueId = undefined;
     this.startedUtc = null;
@@ -248,6 +249,7 @@ class Feed {
       if (sub.needs.includes("plan")) this.fetchPlan();
       if (sub.needs.includes("progress")) this.fetchProgress();
       if (sub.needs.includes("seqTargets")) this.fetchSeqTargets();
+      if (sub.needs.includes("autofocus")) this.fetchAutofocus();
     }
     return () => {
       this.subs.delete(sub);
@@ -275,6 +277,8 @@ class Feed {
     this.progressTimer = setInterval(() => this.fetchProgress(), PROGRESS_MS);
     this.fetchSeqTargets();
     this.seqTimer = setInterval(() => this.fetchSeqTargets(), 30000);
+    this.fetchAutofocus();
+    this.afTimer = setInterval(() => this.fetchAutofocus(), 60000);
   }
 
   stop() {
@@ -284,6 +288,7 @@ class Feed {
     clearInterval(this.planTimer);
     clearInterval(this.progressTimer);
     clearInterval(this.seqTimer);
+    clearInterval(this.afTimer);
     clearTimeout(this.planRetry);
   }
 
@@ -405,6 +410,19 @@ class Feed {
     try {
       this.seqTargets = await api(this.dev, "/api/v1/sequence/targets", 20000);
       this.emit("seqTargets");
+    } catch {
+      /* surfaced by status poll */
+    }
+  }
+
+  async fetchAutofocus() {
+    if (!this.needs("autofocus")) return;
+    try {
+      const af = await api(this.dev, "/api/v1/autofocus");
+      if (af.latest?.id === this.autofocus?.latest?.id && this.autofocus)
+        return;
+      this.autofocus = af;
+      this.emit("autofocus");
     } catch {
       /* surfaced by status poll */
     }
@@ -2180,6 +2198,133 @@ const CARDS = {
     },
   },
 
+  autofocus: {
+    title: "Autofocus",
+    span: 2,
+    needs: ["autofocus"],
+    // Hidden in Full view until NINA has written at least one autofocus report.
+    available: (feed) => !feed.autofocus || feed.autofocus.available,
+    mount(body, feed, onDispose) {
+      const head = el("div", { class: "muted small" });
+      const canvas = el("canvas", { height: 200 });
+      const dl = el("dl", { class: "kv" });
+      const recent = el("div", { class: "tablewrap" });
+      body.append(head, canvas, dl, recent);
+
+      const draw = () => drawFocusCurve(canvas, feed.autofocus?.latest);
+      let shownId;
+      const render = () => {
+        const af = feed.autofocus;
+        if (!af) {
+          head.textContent = "Loading…";
+          return;
+        }
+        shownId = af.latest?.id ?? null;
+        const r = af.latest;
+        if (!r) {
+          head.textContent = af.error
+            ? `Could not read autofocus reports: ${af.error}`
+            : "No autofocus runs recorded yet.";
+          kv(dl, []);
+          recent.replaceChildren();
+          draw();
+          return;
+        }
+        head.textContent = `${fmt.hm(r.timestampUtc)} (${fmt.ago(r.timestampUtc)})${r.filter ? ` · ${r.filter}` : ""}`;
+        const fit = (r.fitting || "").toLowerCase();
+        const r2 = r.rSquares
+          ? fit.includes("hyperbolic")
+            ? r.rSquares.hyperbolic
+            : fit.includes("parabolic") || fit.includes("quadratic")
+              ? r.rSquares.quadratic
+              : fit.includes("trend")
+                ? Math.min(
+                    r.rSquares.leftTrend ?? 1,
+                    r.rSquares.rightTrend ?? 1,
+                  )
+                : null
+          : null;
+        const shift =
+          r.calculated && r.previous
+            ? Math.round(r.calculated.position - r.previous.position)
+            : null;
+        kv(dl, [
+          [
+            "Focus position",
+            r.calculated
+              ? `${Math.round(r.calculated.position)}${shift ? ` (${shift > 0 ? "+" : ""}${shift} vs previous)` : ""}`
+              : "No focus point found",
+          ],
+          [
+            /contrast/i.test(r.method || "") ? "Best contrast" : "Best HFR",
+            fmt.num(r.calculated?.value, 2),
+          ],
+          ["Temperature", fmt.num(r.temperature, 1, "°C")],
+          ["Method", [r.method, r.fitting].filter(Boolean).join(" · ") || null],
+          ["R²", fmt.num(r2, 3)],
+          ["Points", r.points?.length ? String(r.points.length) : null],
+          [
+            "Duration",
+            r.durationSeconds != null
+              ? `${Math.floor(r.durationSeconds / 60)}m ${String(Math.round(r.durationSeconds % 60)).padStart(2, "0")}s`
+              : null,
+          ],
+        ]);
+        recent.replaceChildren(
+          af.recent?.length > 1
+            ? el(
+                "table",
+                null,
+                el(
+                  "thead",
+                  null,
+                  el(
+                    "tr",
+                    null,
+                    ...["Time", "Filter", "Position", "HFR", "Temp"].map((h) =>
+                      el("th", { text: h }),
+                    ),
+                  ),
+                ),
+                el(
+                  "tbody",
+                  null,
+                  ...af.recent.map((x) =>
+                    el(
+                      "tr",
+                      null,
+                      ...[
+                        fmt.hm(x.timestampUtc),
+                        x.filter,
+                        x.position != null
+                          ? String(Math.round(x.position))
+                          : "—",
+                        fmt.num(x.value, 2),
+                        fmt.num(x.temperature, 1, "°C"),
+                      ].map((v) => el("td", { text: v ?? "" })),
+                    ),
+                  ),
+                ),
+              )
+            : null,
+        );
+        draw();
+      };
+      const observer = new ResizeObserver(draw);
+      observer.observe(canvas);
+      onDispose(() => observer.disconnect());
+      return (kind) => {
+        // The report can arrive before the first status, when updates are not delivered yet.
+        if (
+          kind === "autofocus" ||
+          kind === "all" ||
+          (feed.autofocus && shownId === undefined)
+        )
+          render();
+      };
+    },
+  },
+
   issues: {
     title: "Errors & warnings",
     span: 2,
@@ -2365,6 +2510,130 @@ function drawChart(canvas, points, tz) {
   ctx.fillText(fmt.time(points[0].timestampUtc, tz), pad.l, h - 3);
   const last = fmt.time(points.at(-1).timestampUtc, tz);
   ctx.fillText(last, w - pad.r - ctx.measureText(last).width, h - 3);
+}
+
+/** Plots the measured focus points of an autofocus report with the chosen focus position. */
+function drawFocusCurve(canvas, report) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth;
+  const h = 200;
+  if (!w) return;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  const style = getComputedStyle(document.documentElement);
+  const muted = style.getPropertyValue("--muted");
+  const accent = style.getPropertyValue("--accent");
+  const good = style.getPropertyValue("--ok");
+  ctx.font = "11px system-ui";
+  ctx.fillStyle = muted;
+
+  const pts = (report?.points || []).filter((p) => p.value != null);
+  if (pts.length < 2) {
+    ctx.fillText(
+      report ? "No measured points in this report." : "No autofocus data.",
+      10,
+      h / 2,
+    );
+    return;
+  }
+
+  const best = report.calculated;
+  const xs = pts.map((p) => p.position).concat(best ? [best.position] : []);
+  const ys = pts.flatMap((p) => [
+    p.value + (p.error || 0),
+    Math.max(0, p.value - (p.error || 0)),
+  ]);
+  if (best?.value != null) ys.push(best.value);
+  const xMin = Math.min(...xs);
+  const xMax = Math.max(...xs);
+  const yMin = Math.min(...ys);
+  const yMax = Math.max(...ys);
+  const xSpan = xMax - xMin || 1;
+  const ySpan = yMax - yMin || 1;
+  const pad = { l: 40, r: 10, t: 10, b: 20 };
+  const x = (v) => pad.l + ((v - xMin) / xSpan) * (w - pad.l - pad.r);
+  const y = (v) =>
+    pad.t +
+    (1 - (v - (yMin - ySpan * 0.05)) / (ySpan * 1.1)) * (h - pad.t - pad.b);
+
+  // Axes labels and light grid.
+  ctx.strokeStyle = "#ffffff14";
+  ctx.lineWidth = 1;
+  for (const f of [0, 0.5, 1]) {
+    const v = yMin + f * ySpan;
+    ctx.beginPath();
+    ctx.moveTo(pad.l, y(v));
+    ctx.lineTo(w - pad.r, y(v));
+    ctx.stroke();
+    ctx.fillText(v.toFixed(2), 2, y(v) + 4);
+  }
+  ctx.fillText(String(Math.round(xMin)), pad.l, h - 4);
+  const xMaxLabel = String(Math.round(xMax));
+  ctx.fillText(xMaxLabel, w - pad.r - ctx.measureText(xMaxLabel).width, h - 4);
+
+  if (report.previous) {
+    ctx.strokeStyle = muted;
+    ctx.setLineDash([2, 4]);
+    ctx.beginPath();
+    ctx.moveTo(x(report.previous.position), pad.t);
+    ctx.lineTo(x(report.previous.position), h - pad.b);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  ctx.strokeStyle = accent;
+  ctx.globalAlpha = 0.5;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  pts.forEach((p, i) =>
+    i
+      ? ctx.lineTo(x(p.position), y(p.value))
+      : ctx.moveTo(x(p.position), y(p.value)),
+  );
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  for (const p of pts) {
+    if (p.error) {
+      ctx.strokeStyle = muted;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x(p.position), y(p.value - p.error));
+      ctx.lineTo(x(p.position), y(p.value + p.error));
+      ctx.stroke();
+    }
+    ctx.fillStyle = accent;
+    ctx.beginPath();
+    ctx.arc(x(p.position), y(p.value), 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (best) {
+    const bx = x(best.position);
+    ctx.strokeStyle = good;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(bx, pad.t);
+    ctx.lineTo(bx, h - pad.b);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (best.value != null) {
+      ctx.fillStyle = good;
+      ctx.beginPath();
+      ctx.arc(bx, y(best.value), 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const label = String(Math.round(best.position));
+    const lw = ctx.measureText(label).width;
+    ctx.fillStyle = good;
+    ctx.fillText(
+      label,
+      Math.min(Math.max(bx - lw / 2, pad.l), w - pad.r - lw),
+      pad.t + 9,
+    );
+  }
 }
 
 /** Draws RA/Dec error like NINA's guide graph. Returns an RMS summary of the shown window. */

@@ -50,11 +50,12 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
         private readonly TargetSchedulerTracker scheduler;
         private readonly AllSkyService allSky;
         private readonly SequenceTracker sequenceTracker;
+        private readonly AutoFocusTracker autoFocus;
         private readonly Func<double?> guiderPixelScale;
         private readonly Func<string> apiKey;
         private readonly Func<string> allowedOrigins;
 
-        public TelemetryApi(TelemetryCollector collector, ImageTracker images, LogTracker logs, GuideTracker guiding, TargetSchedulerTracker scheduler, AllSkyService allSky, SequenceTracker sequenceTracker, Func<double?> guiderPixelScale, Func<string> apiKey, Func<string> allowedOrigins) {
+        public TelemetryApi(TelemetryCollector collector, ImageTracker images, LogTracker logs, GuideTracker guiding, TargetSchedulerTracker scheduler, AllSkyService allSky, SequenceTracker sequenceTracker, AutoFocusTracker autoFocus, Func<double?> guiderPixelScale, Func<string> apiKey, Func<string> allowedOrigins) {
             this.collector = collector;
             this.images = images;
             this.logs = logs;
@@ -62,6 +63,7 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
             this.scheduler = scheduler;
             this.allSky = allSky;
             this.sequenceTracker = sequenceTracker;
+            this.autoFocus = autoFocus;
             this.guiderPixelScale = guiderPixelScale;
             this.apiKey = apiKey;
             this.allowedOrigins = allowedOrigins;
@@ -180,6 +182,9 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
 
                 case "/api/v1/scheduler/progress":
                     return Json(scheduler.GetProgress());
+
+                case "/api/v1/autofocus":
+                    return Json(autoFocus.Get());
 
                 case "/api/v1/allsky":
                 case "/api/v1/allsky/refresh":
