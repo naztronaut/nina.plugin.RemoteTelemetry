@@ -252,6 +252,35 @@ body.editing .card {
   display: flex;
   gap: 4px;
 }
+.snap-btn {
+  margin-left: auto;
+  padding: 2px 6px;
+  line-height: 0;
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+}
+.snap-btn:hover {
+  color: var(--text);
+}
+.snap-btn svg {
+  width: 15px;
+  height: 15px;
+}
+.snap-btn + .tools {
+  margin-left: 4px;
+}
+.snap-preview {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  margin: 0 auto;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+#snapDialog {
+  width: min(900px, 94vw);
+}
 .tools button {
   padding: 1px 7px;
   font-size: 12px;

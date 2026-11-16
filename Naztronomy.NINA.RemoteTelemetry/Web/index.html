@@ -92,6 +92,19 @@
       </form>
     </dialog>
 
+    <dialog id="snapDialog">
+      <form method="dialog" class="dialog">
+        <h2>Snapshot</h2>
+        <img id="snapImg" class="snap-preview" alt="Card snapshot" />
+        <p id="snapNote" class="muted small" hidden></p>
+        <div class="right">
+          <button id="snapCopy" type="button">Copy to clipboard</button>
+          <button id="snapSave" type="button" class="primary">Save JPG</button>
+          <button value="close" formnovalidate>Close</button>
+        </div>
+      </form>
+    </dialog>
+
     <script src="app.js"></script>
   </body>
 </html>

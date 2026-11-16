@@ -2757,12 +2757,23 @@ function buildCard(cfg, custom) {
   const dev = deviceById(cfg.deviceId);
   const feed = feedFor(dev);
   const status = el("span", { class: "card-status" });
+  const snap = el(
+    "button",
+    {
+      type: "button",
+      class: "snap-btn",
+      title: "Take snapshot",
+      "aria-label": "Take snapshot",
+    },
+    cameraIcon(),
+  );
   const head = el(
     "h2",
     null,
     def.title,
     custom ? el("span", { class: "src-tag", text: dev.name }) : null,
     status,
+    snap,
   );
   if (custom && editMode) head.append(editTools(cfg));
   const body = el("div", { class: "card-body" });
@@ -2771,6 +2782,9 @@ function buildCard(cfg, custom) {
     { class: `card span-${cfg.span || def.span}${def.tall ? " row-2" : ""}` },
     head,
     body,
+  );
+  snap.addEventListener("click", () =>
+    openSnapshot(section, `${dev.name} ${def.title}`, dev.name),
   );
   const update = def.mount(body, feed, (fn) => unmounts.push(fn));
 
@@ -2789,6 +2803,324 @@ function buildCard(cfg, custom) {
   );
   return section;
 }
+
+// ---------- card snapshots ----------
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function cameraIcon() {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  const attrs = {
+    viewBox: "0 0 24 24",
+    "aria-hidden": "true",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "2",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+  };
+  for (const [k, v] of Object.entries(attrs)) svg.setAttribute(k, v);
+  for (const [tag, a] of [
+    [
+      "path",
+      {
+        d: "M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z",
+      },
+    ],
+    ["circle", { cx: "12", cy: "13", r: "3.5" }],
+  ]) {
+    const e = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(a)) e.setAttribute(k, v);
+    svg.append(e);
+  }
+  return svg;
+}
+
+// Inherited text properties are always copied so the clone can't pick up a parent's value by mistake.
+const SNAP_ALWAYS =
+  /^(color|font|line-height|letter-spacing|text-|white-space|word-|overflow-wrap|visibility)/;
+
+function snapshotStyler() {
+  const sandbox = el("div");
+  sandbox.style.setProperty("position", "absolute");
+  sandbox.style.setProperty("left", "-99999px");
+  sandbox.style.setProperty("top", "0");
+  document.body.append(sandbox);
+  const baselines = new Map();
+  const baseline = (tag) => {
+    let b = baselines.get(tag);
+    if (!b) {
+      const probe = document.createElement(tag);
+      sandbox.append(probe);
+      const cs = getComputedStyle(probe);
+      b = {};
+      for (const p of cs) b[p] = cs.getPropertyValue(p);
+      probe.remove();
+      baselines.set(tag, b);
+    }
+    return b;
+  };
+  let shorthands;
+  return {
+    copy(src, dst) {
+      const cs = getComputedStyle(src);
+      const base = baseline(src.tagName);
+      const names = [...cs];
+      // Chrome also lists a few shorthands (e.g. border-image) whose serialization differs; longhands suffice.
+      shorthands ??= new Set(
+        names.filter(
+          (p) => p !== "text-align" && names.some((q) => q.startsWith(`${p}-`)),
+        ),
+      );
+      // Table parts size themselves; fixed cell heights render taller in the SVG.
+      const tablePart = cs.display.startsWith("table");
+      for (const p of names) {
+        // Prefixed aliases (e.g. -webkit-border-image) re-serialize with "fill" and paint over content.
+        if (shorthands.has(p) || p.startsWith("-webkit-")) continue;
+        if (tablePart && /^(height|block-size)$/.test(p)) continue;
+        const v = cs.getPropertyValue(p);
+        if (v !== base[p] || SNAP_ALWAYS.test(p)) dst.style.setProperty(p, v);
+      }
+    },
+    dispose: () => sandbox.remove(),
+  };
+}
+
+async function imageDataUrl(img) {
+  const src = img.currentSrc || img.src;
+  if (!src) return null;
+  if (img.complete && img.naturalWidth) {
+    try {
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      c.getContext("2d").drawImage(img, 0, 0);
+      return c.width * c.height > 250000
+        ? c.toDataURL("image/jpeg", 0.9)
+        : c.toDataURL("image/png");
+    } catch {
+      /* cross-origin image: fetch it instead */
+    }
+  }
+  try {
+    const res = await fetch(src);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function inlineTree(src, dst, styler) {
+  const kids = [...src.childNodes];
+  const dstKids = [...dst.childNodes];
+  for (let i = 0; i < kids.length; i++) {
+    const s = kids[i];
+    const d = dstKids[i];
+    if (s.nodeType !== Node.ELEMENT_NODE) continue;
+    if (
+      s.matches(".snap-btn, .tools") ||
+      getComputedStyle(s).display === "none"
+    ) {
+      d.remove();
+      continue;
+    }
+    if (s instanceof HTMLCanvasElement) {
+      const img = document.createElement("img");
+      try {
+        img.setAttribute("src", s.toDataURL("image/png"));
+      } catch {
+        /* leave blank */
+      }
+      styler.copy(s, img);
+      d.replaceWith(img);
+      continue;
+    }
+    styler.copy(s, d);
+    if (s instanceof HTMLImageElement) {
+      d.removeAttribute("srcset");
+      d.setAttribute("src", (await imageDataUrl(s)) ?? "");
+      continue;
+    }
+    if (s instanceof HTMLInputElement) {
+      d.toggleAttribute("checked", s.checked);
+      d.setAttribute("value", s.value);
+    } else if (s instanceof HTMLSelectElement) {
+      [...d.options].forEach((o, j) =>
+        o.toggleAttribute("selected", j === s.selectedIndex),
+      );
+    }
+    await inlineTree(s, d, styler);
+    // Scrollbars make no sense in a picture; keep what was scrolled into view (e.g. the end of the log).
+    const ov = getComputedStyle(s);
+    if (/auto|scroll/.test(ov.overflowX + ov.overflowY))
+      d.style.setProperty("overflow", "hidden");
+    if (s.scrollTop || s.scrollLeft)
+      for (const k of d.children)
+        k.style.setProperty(
+          "transform",
+          `translate(${-s.scrollLeft}px, ${-s.scrollTop}px)`,
+        );
+  }
+}
+
+async function renderSnapshot(card, deviceName) {
+  const pad = 16;
+  const footH = 24;
+  const rect = card.getBoundingClientRect();
+  const w = Math.ceil(rect.width);
+  const h = Math.ceil(rect.height);
+  const W = w + pad * 2;
+  const H = h + pad * 2 + footH;
+  const bodyStyle = getComputedStyle(document.body);
+  const bg =
+    getComputedStyle(document.documentElement)
+      .getPropertyValue("--bg")
+      .trim() || "#0c0b11";
+
+  const styler = snapshotStyler();
+  let markup;
+  try {
+    const clone = card.cloneNode(true);
+    styler.copy(card, clone);
+    await inlineTree(card, clone, styler);
+    clone.style.setProperty("margin", "0");
+    clone.style.setProperty("width", `${w}px`);
+    clone.style.setProperty("height", `${h}px`);
+    clone.style.setProperty("box-sizing", "border-box");
+
+    const muted = getComputedStyle(document.documentElement)
+      .getPropertyValue("--muted")
+      .trim();
+    const foot = el(
+      "div",
+      null,
+      el("span", {
+        text: `${deviceName} · ${new Date().toLocaleString()}`,
+      }),
+      el("span", { text: "N.I.N.A. Remote Telemetry" }),
+    );
+    for (const [k, v] of [
+      ["display", "flex"],
+      ["justify-content", "space-between"],
+      ["align-items", "flex-end"],
+      ["height", `${footH}px`],
+      ["font-size", "11px"],
+      ["color", muted],
+    ])
+      foot.style.setProperty(k, v);
+
+    const wrap = el("div", null, clone, foot);
+    for (const [k, v] of [
+      ["width", `${W}px`],
+      ["height", `${H}px`],
+      ["box-sizing", "border-box"],
+      ["padding", `${pad}px`],
+      ["background", bg],
+      ["color", bodyStyle.color],
+      ["font", bodyStyle.font],
+    ])
+      wrap.style.setProperty(k, v);
+    markup = new XMLSerializer().serializeToString(wrap);
+  } finally {
+    styler.dispose();
+  }
+
+  const svg = `<svg xmlns="${SVG_NS}" width="${W}" height="${H}"><foreignObject x="0" y="0" width="100%" height="100%">${markup}</foreignObject></svg>`;
+  // A blob: URL would taint the canvas in Chrome; a data: URL does not.
+  const img = new Image();
+  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  await img.decode();
+  const scale = 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = W * scale;
+  canvas.height = H * scale;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+const toBlob = (canvas, type, quality) =>
+  new Promise((resolve, reject) =>
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error("Could not encode image."))),
+      type,
+      quality,
+    ),
+  );
+
+let lastSnap = null;
+
+function snapNote(text) {
+  $("snapNote").textContent = text;
+  $("snapNote").hidden = !text;
+}
+
+async function openSnapshot(card, name, deviceName) {
+  const btn = card.querySelector(".snap-btn");
+  btn.disabled = true;
+  try {
+    const canvas = await renderSnapshot(card, deviceName);
+    const [jpg, png] = await Promise.all([
+      toBlob(canvas, "image/jpeg", 0.92),
+      toBlob(canvas, "image/png"),
+    ]);
+    if (lastSnap) URL.revokeObjectURL(lastSnap.url);
+    const d = new Date();
+    const pad2 = (n) => String(n).padStart(2, "0");
+    const stamp = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}`;
+    lastSnap = {
+      jpg,
+      png,
+      url: URL.createObjectURL(jpg),
+      file: `${name.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "")}_${stamp}.jpg`,
+    };
+    $("snapImg").src = lastSnap.url;
+    const canCopy = !!(
+      window.isSecureContext &&
+      navigator.clipboard?.write &&
+      window.ClipboardItem
+    );
+    $("snapCopy").disabled = !canCopy;
+    snapNote(
+      canCopy
+        ? ""
+        : "Browsers only allow copying images on https:// or localhost pages. Use Save JPG, or right-click the preview and copy it.",
+    );
+    $("snapDialog").showModal();
+  } catch (e) {
+    console.error(e);
+    alert(`Snapshot failed: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$("snapCopy").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.write([
+      new ClipboardItem({ "image/png": lastSnap.png }),
+    ]);
+    snapNote("Copied to clipboard.");
+  } catch (e) {
+    snapNote(`Copy failed: ${e.message}`);
+  }
+});
+
+$("snapSave").addEventListener("click", () => {
+  const a = el("a", { href: lastSnap.url, download: lastSnap.file });
+  document.body.append(a);
+  a.click();
+  a.remove();
+});
 
 function editTools(cfg) {
   const move = (delta) => {
