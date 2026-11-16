@@ -79,12 +79,30 @@ function newId() {
 function normalizeUrl(input) {
   let s = String(input || "").trim();
   if (!s) throw new Error("Enter an address such as 100.64.0.12:8787.");
-  if (!/^https?:\/\//i.test(s)) s = `http://${s}`;
+  // An https page can only call https NINAs, so default to https there.
+  if (!/^https?:\/\//i.test(s))
+    s = `${location.protocol === "https:" ? "https" : "http"}://${s}`;
   const u = new URL(s);
   if (u.protocol !== "http:" && u.protocol !== "https:")
     throw new Error("Only http(s) addresses are supported.");
   if (!u.port && u.protocol === "http:") u.port = "8787";
   return u.origin;
+}
+
+// Set by the standalone (e.g. Cloudflare-hosted) build, which is not served by a NINA.
+const HOSTED =
+  document.querySelector('meta[name="nrt-hosted"]')?.content === "1";
+
+const isLocalHost = (host) =>
+  host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+
+function mixedContentProblem(url) {
+  const u = new URL(url);
+  return location.protocol === "https:" &&
+    u.protocol === "http:" &&
+    !isLocalHost(u.hostname)
+    ? "This page is served over https, so browsers block plain http:// NINA addresses. Turn on “Serve the dashboard over HTTPS on my tailnet” in the plugin options and use the https://…ts.net address it shows."
+    : null;
 }
 
 // ---------- persisted state ----------
@@ -3376,6 +3394,12 @@ async function addDevice() {
     err.hidden = false;
     return;
   }
+  const mixed = mixedContentProblem(url);
+  if (mixed) {
+    err.textContent = mixed;
+    err.hidden = false;
+    return;
+  }
   const dev = {
     id: newId(),
     url,
@@ -3401,7 +3425,7 @@ async function addDevice() {
 }
 
 async function autoAddCurrentHost() {
-  if (devices.length || !location.protocol.startsWith("http")) return;
+  if (HOSTED || devices.length || !location.protocol.startsWith("http")) return;
   const self = { id: newId(), url: location.origin, key: "", name: "" };
   try {
     const info = await api(self, "/api/v1/info", 4000);
@@ -3413,6 +3437,157 @@ async function autoAddCurrentHost() {
   } catch {
     $("newUrl").value = location.origin;
   }
+}
+
+// ---------- config export / import ----------
+
+const CONFIG_FORMAT = "nina-remote-telemetry-config";
+const PREFIX = "nina-remote-telemetry.";
+const CORE_KEYS = new Set([KEYS.devices, KEYS.layout, KEYS.view]);
+
+function exportConfig() {
+  const withKeys = $("cfgIncludeKeys").checked;
+  const settings = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k.startsWith(PREFIX) && !CORE_KEYS.has(k))
+      settings[k.slice(PREFIX.length)] = localStorage.getItem(k);
+  }
+  const config = {
+    format: CONFIG_FORMAT,
+    version: 1,
+    exportedUtc: new Date().toISOString(),
+    devices: devices.map(({ id, name, url, key }) =>
+      withKeys && key ? { id, name, url, key } : { id, name, url },
+    ),
+    layout,
+    view: currentView,
+    settings,
+  };
+  const blob = new Blob([JSON.stringify(config, null, 2)], {
+    type: "application/json",
+  });
+  const href = URL.createObjectURL(blob);
+  const a = el("a", {
+    href,
+    download: `nina-remote-telemetry-config_${new Date().toISOString().slice(0, 10)}.json`,
+  });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 10000);
+  cfgNote(
+    withKeys
+      ? "Downloaded. The file contains API keys: store it somewhere private."
+      : "Downloaded (without API keys).",
+  );
+}
+
+/** Validates an imported file; throws with a readable message when it isn't a usable config. */
+function parseConfig(text) {
+  let c;
+  try {
+    c = JSON.parse(text);
+  } catch {
+    throw new Error("The file is not valid JSON.");
+  }
+  if (c?.format !== CONFIG_FORMAT || !Array.isArray(c.devices))
+    throw new Error("This is not a Remote Telemetry config file.");
+  const str = (v, max = 500) =>
+    typeof v === "string" && v.length <= max ? v : null;
+  const devs = c.devices.map((d, i) => {
+    let url;
+    try {
+      url = normalizeUrl(str(d?.url) ?? "");
+    } catch {
+      throw new Error(`Device ${i + 1} has an invalid address.`);
+    }
+    const id = str(d?.id, 40) || newId();
+    if (!/^[\w-]+$/.test(id)) throw new Error(`Device ${i + 1} has a bad id.`);
+    return {
+      id,
+      url,
+      name: str(d?.name, 120) || url,
+      key: str(d?.key, 200) ?? "",
+    };
+  });
+  const ids = new Set(devs.map((d) => d.id));
+  const cards = (Array.isArray(c.layout) ? c.layout : [])
+    .filter((x) => CARDS[x?.type] && ids.has(x?.deviceId))
+    .map((x) => ({
+      id: str(x.id, 40) || newId(),
+      type: x.type,
+      deviceId: x.deviceId,
+      span: [1, 2, 4].includes(x.span) ? x.span : CARDS[x.type].span,
+    }));
+  const settings = {};
+  for (const [k, v] of Object.entries(c.settings ?? {}))
+    if (/^[\w.-]{1,80}$/.test(k) && str(v, 2000) != null) settings[k] = v;
+  const view = str(c.view, 60);
+  return {
+    devices: devs,
+    layout: cards,
+    view:
+      view === "custom" ||
+      (view?.startsWith("device:") && ids.has(view.slice(7)))
+        ? view
+        : "custom",
+    settings,
+  };
+}
+
+async function importConfig(file) {
+  if (!file) return;
+  try {
+    if (file.size > 1_000_000) throw new Error("The file is too large.");
+    const cfg = parseConfig(await file.text());
+    const keyless = cfg.devices.filter((d) => !d.key).length;
+    if (
+      !confirm(
+        `Replace your current ${devices.length} device(s) and layout with ${cfg.devices.length} device(s) and ${cfg.layout.length} card(s) from "${file.name}"?`,
+      )
+    )
+      return;
+    // Keep API keys already saved in this browser for the same addresses.
+    for (const d of cfg.devices)
+      d.key ||= devices.find((x) => x.url === d.url)?.key ?? "";
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k.startsWith(PREFIX)) localStorage.removeItem(k);
+    }
+    for (const [k, v] of Object.entries(cfg.settings))
+      localStorage.setItem(PREFIX + k, v);
+    localStorage.setItem(KEYS.devices, JSON.stringify(cfg.devices));
+    localStorage.setItem(KEYS.layout, JSON.stringify(cfg.layout));
+    localStorage.setItem(KEYS.view, cfg.view);
+    const stillKeyless = cfg.devices.filter((d) => !d.key).length;
+    if (keyless && stillKeyless)
+      alert(
+        `${stillKeyless} device(s) have no API key. If those NINAs require one, add it in Devices.`,
+      );
+    location.reload();
+  } catch (e) {
+    cfgNote(`Import failed: ${e.message}`);
+  } finally {
+    $("cfgFile").value = "";
+  }
+}
+
+function cfgNote(text) {
+  // Import can also start from the empty-state button, when the dialog is closed.
+  if (text && !$("configDialog").open) {
+    alert(text);
+    return;
+  }
+  $("cfgNote").textContent = text;
+  $("cfgNote").hidden = !text;
+}
+
+function openConfig() {
+  cfgNote("");
+  $("cfgSummary").textContent =
+    `${devices.length} device(s), ${layout.length} card(s) in "My dashboard".`;
+  $("configDialog").showModal();
 }
 
 // ---------- boot ----------
@@ -3446,6 +3621,16 @@ async function init() {
   });
   $("addCardBtn").addEventListener("click", openCardDialog);
   $("cardAddBtn").addEventListener("click", addCard);
+  $("configBtn").addEventListener("click", openConfig);
+  $("cfgExport").addEventListener("click", exportConfig);
+  $("cfgImport").addEventListener("click", () => $("cfgFile").click());
+  $("cfgFile").addEventListener("change", (e) =>
+    importConfig(e.target.files?.[0]),
+  );
+  $("emptyImportBtn").addEventListener("click", () => $("cfgFile").click());
+  if (HOSTED)
+    $("emptyHint").textContent =
+      "Add a NINA running the Remote Telemetry plugin by its https address, e.g. https://observatory.your-tailnet.ts.net:8788 (turn on “Serve the dashboard over HTTPS on my tailnet” in the plugin options), or import a config file you exported earlier.";
 
   loadState();
   await autoAddCurrentHost();

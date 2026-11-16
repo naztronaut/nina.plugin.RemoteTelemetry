@@ -32,17 +32,25 @@
           Night
         </button>
         <button id="manageBtn" type="button">Devices</button>
+        <button
+          id="configBtn"
+          type="button"
+          title="Export or import your devices and layout"
+        >
+          Config
+        </button>
       </div>
     </header>
 
     <main id="empty" class="empty" hidden>
       <h1>No NINA devices yet</h1>
-      <p>
+      <p id="emptyHint">
         Add a NINA instance running the Remote Telemetry plugin, e.g.
         <code>http://100.xx.x.xx:8787</code> or
         <code>http://hostname:8787</code>.
       </p>
       <button id="emptyAddBtn" type="button" class="primary">Add device</button>
+      <button id="emptyImportBtn" type="button">Import config</button>
     </main>
 
     <main id="view" class="grid"></main>
@@ -88,6 +96,54 @@
         <div class="right">
           <button value="cancel" formnovalidate>Cancel</button>
           <button id="cardAddBtn" type="button" class="primary">Add</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="configDialog">
+      <form method="dialog" class="dialog">
+        <h2>Configuration</h2>
+        <p class="muted small">
+          Your devices, dashboard layout and display settings are stored only in
+          this browser. Export them to a file to back them up or move them to
+          another browser, and import that file later.
+        </p>
+        <fieldset>
+          <legend>Export</legend>
+          <p id="cfgSummary" class="small"></p>
+          <label class="inline small"
+            ><input id="cfgIncludeKeys" type="checkbox" /> Include API
+            keys</label
+          >
+          <p class="muted small">
+            Without keys the file is safe to share; you re-enter keys after
+            importing. With keys, treat the file like a password.
+          </p>
+          <div>
+            <button id="cfgExport" type="button" class="primary">
+              Download config (.json)
+            </button>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Import</legend>
+          <p class="muted small">
+            Replaces the devices, layout and settings in this browser. API keys
+            already saved here are kept for matching addresses.
+          </p>
+          <input
+            id="cfgFile"
+            type="file"
+            accept=".json,application/json"
+            hidden
+          />
+          <div>
+            <button id="cfgImport" type="button">Choose file…</button>
+          </div>
+        </fieldset>
+        <p id="cfgNote" class="small" hidden></p>
+        <div class="right">
+          <button value="close" formnovalidate>Close</button>
         </div>
       </form>
     </dialog>

@@ -56,6 +56,8 @@ namespace Naztronomy.NINA.RemoteTelemetry {
         private readonly TelemetryApi api;
         private MiniHttpServer server;
         private string serverStatus = "Stopped";
+        private readonly TailscaleServe tailscale = new TailscaleServe();
+        private TailscaleServe.State tailscaleState = new TailscaleServe.State(false, null, "Off");
 
         [ImportingConstructor]
         public RemoteTelemetryPlugin(
@@ -107,6 +109,7 @@ namespace Naztronomy.NINA.RemoteTelemetry {
             BrowseAllSkyFileCommand = new RelayCommand(BrowseAllSkyFile);
             BrowseAllSkyFolderCommand = new RelayCommand(BrowseAllSkyFolder);
             TestAllSkyCommand = new RelayCommand(() => _ = CheckAllSkyAsync());
+            CheckTailscaleCommand = new RelayCommand(() => _ = ApplyTailscaleAsync());
 
             profileService.ProfileChanged += ProfileService_ProfileChanged;
 
@@ -114,6 +117,9 @@ namespace Naztronomy.NINA.RemoteTelemetry {
             schedulerTracker.Start();
             _ = CheckAllSkyAsync();
             RestartServer();
+            if (TailscaleServeEnabled) {
+                _ = ApplyTailscaleAsync();
+            }
         }
 
         public override Task Teardown() {
@@ -136,8 +142,11 @@ namespace Naztronomy.NINA.RemoteTelemetry {
             RaisePropertyChanged(nameof(TargetSchedulerPort));
             RaisePropertyChanged(nameof(TargetSchedulerStatus));
             RaisePropertyChanged(nameof(AllSkySource));
+            RaisePropertyChanged(nameof(TailscaleServeEnabled));
+            RaisePropertyChanged(nameof(TailscaleServePort));
             _ = CheckAllSkyAsync();
             RestartServer();
+            _ = ApplyTailscaleAsync();
         }
 
         public ICommand RestartServerCommand { get; }
@@ -246,10 +255,62 @@ namespace Naztronomy.NINA.RemoteTelemetry {
                     RaisePropertyChanged();
                     return;
                 }
+                var oldPort = ServerPort;
                 settings.SetValueInt32(nameof(ServerPort), value);
                 RaisePropertyChanged();
                 RestartServer();
+                if (TailscaleServeEnabled && oldPort != value) {
+                    _ = MoveTailscaleAsync(TailscaleServePort, oldPort);
+                }
             }
+        }
+
+        public ICommand CheckTailscaleCommand { get; }
+
+        /// <summary>Also publish the dashboard over HTTPS on the tailnet via "tailscale serve".</summary>
+        public bool TailscaleServeEnabled {
+            get => settings.GetValueBoolean(nameof(TailscaleServeEnabled), false);
+            set {
+                settings.SetValueBoolean(nameof(TailscaleServeEnabled), value);
+                RaisePropertyChanged();
+                _ = ApplyTailscaleAsync();
+            }
+        }
+
+        /// <summary>HTTPS port on the tailnet; a dedicated port leaves any other Serve setup alone.</summary>
+        public int TailscaleServePort {
+            get => settings.GetValueInt32(nameof(TailscaleServePort), 8788);
+            set {
+                if (value < 1 || value > 65535) {
+                    RaisePropertyChanged();
+                    return;
+                }
+                var oldPort = TailscaleServePort;
+                settings.SetValueInt32(nameof(TailscaleServePort), value);
+                RaisePropertyChanged();
+                if (TailscaleServeEnabled && oldPort != value) {
+                    _ = MoveTailscaleAsync(oldPort, ServerPort);
+                }
+            }
+        }
+
+        public string TailscaleStatus => tailscaleState.Message;
+
+        private async Task ApplyTailscaleAsync() {
+            SetTailscaleState(new TailscaleServe.State(tailscaleState.Active, tailscaleState.Url, "Checking…"));
+            SetTailscaleState(await tailscale.ApplyAsync(TailscaleServeEnabled, TailscaleServePort, ServerPort));
+        }
+
+        // Removes the rule for the previous ports before adding the current one.
+        private async Task MoveTailscaleAsync(int oldHttpsPort, int oldLocalPort) {
+            await tailscale.ApplyAsync(false, oldHttpsPort, oldLocalPort);
+            await ApplyTailscaleAsync();
+        }
+
+        private void SetTailscaleState(TailscaleServe.State state) {
+            tailscaleState = state;
+            RaisePropertyChanged(nameof(TailscaleStatus));
+            RaisePropertyChanged(nameof(DashboardUrls));
         }
 
         /// <summary>Optional shared secret. When set, every /api request must send it.</summary>
@@ -294,6 +355,9 @@ namespace Naztronomy.NINA.RemoteTelemetry {
                     return Array.Empty<string>();
                 }
                 var urls = new List<string>();
+                if (tailscaleState.Active && tailscaleState.Url != null) {
+                    urls.Add($"{tailscaleState.Url}  (HTTPS on your tailnet)");
+                }
                 try {
                     foreach (var nic in NetworkInterface.GetAllNetworkInterfaces()) {
                         if (nic.OperationalStatus != OperationalStatus.Up || nic.NetworkInterfaceType == NetworkInterfaceType.Loopback) {

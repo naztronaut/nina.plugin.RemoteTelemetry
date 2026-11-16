@@ -28,8 +28,19 @@ To produce a release zip + manifest: `./Package-Plugin.ps1 -InstallerUrl <releas
 | API key           | empty   | When set, `/api/*` requires `X-Api-Key: <key>`, `Authorization: Bearer <key>` or `?key=<key>`. |
 | Allowed origins   | `*`     | CORS. Restrict to e.g. `http://100.101.102.103:8787` if you host the dashboard elsewhere.      |
 | Preview max width | `1280`  | Width of the JPEG preview.                                                                     |
+| HTTPS on tailnet  | off     | Runs `tailscale serve` so the dashboard is also at `https://<pc>.<tailnet>.ts.net:<port>/`.    |
+| HTTPS port        | `8788`  | Tailnet port for the HTTPS address. Only this one Serve rule is ever added or removed.         |
 
-The options page lists the URLs this machine is reachable on (LAN, Tailscale `100.x` address, hostname).
+The options page lists the URLs this machine is reachable on (LAN, Tailscale `100.x` address, hostname, and the HTTPS address when enabled).
+
+### HTTPS on your tailnet (Tailscale Serve)
+
+Tick **Serve the dashboard over HTTPS on my tailnet** to publish the dashboard at an HTTPS address with a certificate managed by Tailscale. This is needed for the hosted dashboard (an https page can't call `http://` NINAs) and for copying card snapshots to the clipboard. The plain LAN address keeps working.
+
+- One-time tailnet setup: enable **MagicDNS** and **HTTPS Certificates** in the Tailscale admin console (DNS page). The status line tells you if they're missing.
+- Only devices on your tailnet can reach it (`tailscale serve`, never Funnel). The rule survives reboots; unticking removes it.
+- If Windows refuses because NINA isn't running as the Tailscale operator, the status shows the one-line command to run in an administrator terminal.
+- Certificate names (`<pc>.<tailnet>.ts.net`) appear in public certificate-transparency logs.
 
 ## Dashboard
 
@@ -40,7 +51,13 @@ Open `http://<nina-host>:8787/` in a browser. The page served by any NINA instan
 
 Each NINA is polled once no matter how many cards use it.
 
-Because each NINA serves the dashboard over plain HTTP, there are no mixed-content problems. If you host the `Web/` files on an HTTPS site instead, browsers will block calls to `http://` NINA instances; use [Tailscale Serve](https://tailscale.com/kb/1312/serve) to put each NINA behind HTTPS in that case.
+**Config** (top bar) exports your devices, layout and display settings to a JSON file (optionally including API keys) and imports it again, e.g. to move to another browser or as a backup. Everything is stored only in the browser.
+
+Each card's camera button saves a snapshot of that card as JPG or copies it to the clipboard (copying needs an `https://` or `localhost` page).
+
+### Hosted dashboard
+
+The [nina-remote-telemetry-web](../nina-remote-telemetry-web) repo builds the same dashboard as a static Astro site for Cloudflare Pages (or any static host), so you can open your observatories from a domain. Because that site is https, each NINA needs the **HTTPS on your tailnet** option above, and its **Allowed origins** should include the site's address.
 
 ## API (v1)
 

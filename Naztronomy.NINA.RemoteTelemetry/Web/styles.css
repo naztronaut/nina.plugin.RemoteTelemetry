@@ -281,6 +281,18 @@ body.editing .card {
 #snapDialog {
   width: min(900px, 94vw);
 }
+fieldset label.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+}
+fieldset p {
+  margin: 0;
+}
+#emptyImportBtn {
+  margin-left: 8px;
+}
 .tools button {
   padding: 1px 7px;
   font-size: 12px;

@@ -71,6 +71,30 @@
                 <Button Margin="6,0,0,0" Padding="10,3" Content="Open dashboard" Command="{Binding OpenDashboardCommand}" />
             </StackPanel>
 
+            <TextBlock Margin="0,18,0,5" FontWeight="Bold" Text="HTTPS on your tailnet (Tailscale Serve)" />
+            <TextBlock
+                Margin="0,0,0,8"
+                TextWrapping="Wrap"
+                Text="Optionally also publishes the dashboard at https://&lt;this-pc&gt;.&lt;tailnet&gt;.ts.net:&lt;port&gt; with a certificate managed by Tailscale. Needed for the hosted dashboard (https pages cannot call http addresses) and for copying snapshots to the clipboard. Only devices on your tailnet can reach it; the plain LAN address keeps working. Requires MagicDNS and HTTPS Certificates enabled in the Tailscale admin console. Note: certificate names are published in public certificate logs." />
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                <CheckBox VerticalAlignment="Center" IsChecked="{Binding TailscaleServeEnabled}" />
+                <TextBlock VerticalAlignment="Center" Margin="10,0,0,0" Text="Serve the dashboard over HTTPS on my tailnet" />
+            </StackPanel>
+            <TextBlock Margin="0,6,0,2" Text="HTTPS port" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                <TextBox
+                    MinWidth="120"
+                    VerticalAlignment="Center"
+                    ToolTip="Port on the tailnet (default 8788). Using a dedicated port leaves any other Tailscale Serve setup on this PC untouched."
+                    Text="{Binding TailscaleServePort, UpdateSourceTrigger=LostFocus}" />
+                <Button Margin="6,0,0,0" Padding="10,3" VerticalAlignment="Center" Content="Check" Command="{Binding CheckTailscaleCommand}" />
+            </StackPanel>
+            <TextBlock
+                Margin="0,6,0,0"
+                FontStyle="Italic"
+                TextWrapping="Wrap"
+                Text="{Binding TailscaleStatus, StringFormat='Status: {0}'}" />
+
             <TextBlock Margin="0,18,0,5" FontWeight="Bold" Text="All-sky camera" />
             <TextBlock
                 Margin="0,0,0,8"
