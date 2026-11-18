@@ -227,6 +227,44 @@ button:focus-visible {
 .card.stale {
   opacity: 0.55;
 }
+.card.collapsed {
+  align-self: start;
+  padding-bottom: 4px;
+}
+.card.collapsed h2 {
+  margin-bottom: 0;
+}
+.card-title {
+  cursor: pointer;
+}
+.collapse-btn {
+  padding: 0;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  position: relative;
+}
+.collapse-btn::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 4px;
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.15s;
+}
+.card.collapsed .collapse-btn::before {
+  transform: translate(-1px, 2px) rotate(-45deg);
+}
+.collapse-btn:hover {
+  color: var(--text);
+}
 body.editing .card {
   outline: 1px dashed var(--accent);
   outline-offset: 2px;

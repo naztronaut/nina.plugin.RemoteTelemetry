@@ -114,6 +114,7 @@ const KEYS = {
   night: "nina-remote-telemetry.night",
   timeMode: "nina-remote-telemetry.timeMode",
   tab: "nina-remote-telemetry.tab",
+  collapsed: "nina-remote-telemetry.collapsed",
 };
 
 let deviceTab = localStorage.getItem(KEYS.tab) === "ts" ? "ts" : "overview";
@@ -2152,7 +2153,14 @@ const CARDS = {
         if (kind !== "status" && kind !== "all") return;
         const g = feed.status.devices.guider;
         if (!g?.connected) {
-          kv(dl, [["Status", "Guider not connected"]]);
+          kv(dl, [
+            [
+              "Status",
+              feed.guide.length
+                ? "Guider not connected (graph shows the last session)"
+                : "Guider not connected",
+            ],
+          ]);
           return;
         }
         const r = g.rms || {};
@@ -2345,6 +2353,7 @@ const CARDS = {
 
   issues: {
     title: "Errors & warnings",
+    collapsed: true,
     span: 2,
     needs: ["issues"],
     mount(body, feed) {
@@ -2368,6 +2377,7 @@ const CARDS = {
 
   logs: {
     title: "Log",
+    collapsed: true,
     span: 4,
     needs: ["logs"],
     mount(body, feed) {
@@ -2670,11 +2680,12 @@ function drawGuideGraph(canvas, feed, range, count, showPulses) {
   const decColor = style.getPropertyValue("--dec");
   ctx.font = "11px system-ui";
 
-  const arcsec = feed.guideScale != null;
+  const scale = feed.guideScale;
+  const arcsec = scale != null;
   const unit = arcsec ? "″" : "px";
   const pts = feed.guide.slice(-count);
-  const raOf = (p) => (arcsec ? p.ra : p.raPx);
-  const decOf = (p) => (arcsec ? p.dec : p.decPx);
+  const raOf = (p) => (arcsec ? (p.ra ?? p.raPx * scale) : p.raPx);
+  const decOf = (p) => (arcsec ? (p.dec ?? p.decPx * scale) : p.decPx);
 
   const peak = pts.reduce(
     (m, p) => Math.max(m, Math.abs(raOf(p)), Math.abs(decOf(p))),
@@ -2763,7 +2774,7 @@ function drawGuideGraph(canvas, feed, range, count, showPulses) {
     Math.sqrt(pts.reduce((s, p) => s + f(p) ** 2, 0) / pts.length);
   const ra = rms(raOf);
   const dec = rms(decOf);
-  return `RMS (shown): RA ${ra.toFixed(2)}${unit} · Dec ${dec.toFixed(2)}${unit} · Total ${Math.hypot(ra, dec).toFixed(2)}${unit}`;
+  return `RMS: RA ${ra.toFixed(2)}${unit} · Dec ${dec.toFixed(2)}${unit} · Total ${Math.hypot(ra, dec).toFixed(2)}${unit} (last ${pts.length} steps${arcsec ? "" : "; pixel scale unknown"})`;
 }
 
 // ---------- views ----------
@@ -2785,10 +2796,18 @@ function buildCard(cfg, custom) {
     },
     cameraIcon(),
   );
+  const collapse = el("button", {
+    type: "button",
+    class: "collapse-btn",
+    title: "Collapse / expand",
+    "aria-label": `Collapse or expand ${def.title}`,
+  });
+  const title = el("span", { class: "card-title", text: def.title });
   const head = el(
     "h2",
     null,
-    def.title,
+    collapse,
+    title,
     custom ? el("span", { class: "src-tag", text: dev.name }) : null,
     status,
     snap,
@@ -2804,6 +2823,24 @@ function buildCard(cfg, custom) {
   snap.addEventListener("click", () =>
     openSnapshot(section, `${dev.name} ${def.title}`, dev.name),
   );
+  const collapseKey = custom
+    ? `card:${cfg.id}`
+    : `device:${cfg.deviceId}:${cfg.type}`;
+  const setCollapsed = (on) => {
+    section.classList.toggle("collapsed", on);
+    body.hidden = on;
+    collapse.setAttribute("aria-expanded", String(!on));
+  };
+  setCollapsed(isCollapsed(collapseKey, def));
+  const toggleCollapsed = () => {
+    const on = !section.classList.contains("collapsed");
+    setCollapsed(on);
+    saveCollapsed(collapseKey, on);
+    // Hidden content can't measure itself (chart sizes, log scroll), so refresh it on expand.
+    if (!on && feed.status) withZone(feed, () => update("all"));
+  };
+  collapse.addEventListener("click", toggleCollapsed);
+  title.addEventListener("click", toggleCollapsed);
   const update = def.mount(body, feed, (fn) => unmounts.push(fn));
 
   unmounts.push(
@@ -2820,6 +2857,18 @@ function buildCard(cfg, custom) {
     }),
   );
   return section;
+}
+
+// Explicit choices are remembered per card; otherwise the card's default applies.
+function isCollapsed(key, def) {
+  const saved = readJson(KEYS.collapsed, {})[key];
+  return typeof saved === "boolean" ? saved : !!def.collapsed;
+}
+
+function saveCollapsed(key, on) {
+  const all = readJson(KEYS.collapsed, {});
+  all[key] = on;
+  localStorage.setItem(KEYS.collapsed, JSON.stringify(all));
 }
 
 // ---------- card snapshots ----------
@@ -2943,7 +2992,7 @@ async function inlineTree(src, dst, styler) {
     const d = dstKids[i];
     if (s.nodeType !== Node.ELEMENT_NODE) continue;
     if (
-      s.matches(".snap-btn, .tools") ||
+      s.matches(".snap-btn, .collapse-btn, .tools") ||
       getComputedStyle(s).display === "none"
     ) {
       d.remove();

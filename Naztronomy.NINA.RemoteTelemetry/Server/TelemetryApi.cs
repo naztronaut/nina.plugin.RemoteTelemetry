@@ -38,6 +38,7 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
             ["/app.js"] = ("web/app.js", "text/javascript; charset=utf-8"),
             ["/styles.css"] = ("web/styles.css", "text/css; charset=utf-8"),
             ["/favicon.svg"] = ("web/favicon.svg", "image/svg+xml"),
+            ["/logo.png"] = ("web/logo.png", "image/png"),
         };
 
         private const string DashboardCsp =
