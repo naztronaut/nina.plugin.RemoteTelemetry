@@ -1161,6 +1161,17 @@ const CARDS = {
         t.percentComplete == null || t.percentComplete >= 100;
 
       // Same filter + exposure + plan collapses to one row; same filter + exposure from different plans gets the plan name.
+      // Accepted frames only, matching how Target Scheduler counts progress.
+      const imagedSeconds = (filters) =>
+        (filters || []).reduce(
+          (s, f) => s + (f.accepted || 0) * (f.exposureSeconds || 0),
+          0,
+        );
+      const projectImaged = (pr) =>
+        pr.targets
+          .filter((t) => t.active)
+          .reduce((s, t) => s + imagedSeconds(t.filters), 0);
+
       const mergeFilters = (filters) => {
         const rows = new Map();
         for (const f of filters) {
@@ -1218,6 +1229,7 @@ const CARDS = {
                 ["Progress"],
                 ["Accepted", "num"],
                 ["Acquired", "num"],
+                ["Imaged", "num"],
                 ["Remaining", "num"],
                 ["HFR", "num"],
                 ["FWHM", "num"],
@@ -1250,6 +1262,13 @@ const CARDS = {
                 el("td", {
                   class: "num",
                   text: `${r.acquired}${r.ungraded ? ` (${r.ungraded} ungraded)` : ""}`,
+                }),
+                el("td", {
+                  class: "num",
+                  text:
+                    fmt.duration(
+                      (r.accepted || 0) * (r.exposureSeconds || 0),
+                    ) ?? "",
                 }),
                 el("td", {
                   class: "num",
@@ -1290,10 +1309,18 @@ const CARDS = {
         const merged = mergeFilters(t.filters);
         const remaining = merged.filter((f) => f.remaining > 0);
         const rows = showDone.checked ? merged : remaining;
+        const imaged = imagedSeconds(t.filters);
+        const imagedText = imaged > 0 ? `${fmt.long(imaged)} imaged` : null;
         const summary = remaining.length
-          ? `${remaining.map((f) => `${f.label} ${f.remaining}×`).join(" · ")} · ${fmt.long(t.remainingSeconds)} left`
+          ? [
+              remaining.map((f) => `${f.label} ${f.remaining}×`).join(" · "),
+              `${fmt.long(t.remainingSeconds)} left`,
+              imagedText,
+            ]
+              .filter(Boolean)
+              .join(" · ")
           : merged.length
-            ? "complete ✓"
+            ? ["complete ✓", imagedText].filter(Boolean).join(" · ")
             : "no exposure plans";
 
         const open = expanded.has(t.id);
@@ -1491,7 +1518,7 @@ const CARDS = {
                   text:
                     pr.percentComplete == null
                       ? "no exposures planned"
-                      : `${fmt.num(pr.percentComplete, 0)}% · ${pr.remainingSeconds > 0 ? `${fmt.long(pr.remainingSeconds)} left` : "complete"}`,
+                      : `${fmt.num(pr.percentComplete, 0)}% · ${pr.remainingSeconds > 0 ? `${fmt.long(pr.remainingSeconds)} left` : "complete"}${projectImaged(pr) > 0 ? ` · ${fmt.long(projectImaged(pr))} imaged` : ""}`,
                 }),
               ),
               ...(pr.visible.length
