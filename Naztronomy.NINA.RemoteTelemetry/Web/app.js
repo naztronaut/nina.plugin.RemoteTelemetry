@@ -115,6 +115,7 @@ const KEYS = {
   timeMode: "nina-remote-telemetry.timeMode",
   tab: "nina-remote-telemetry.tab",
   collapsed: "nina-remote-telemetry.collapsed",
+  compact: "nina-remote-telemetry.compact",
 };
 
 let deviceTab = localStorage.getItem(KEYS.tab) === "ts" ? "ts" : "overview";
@@ -220,6 +221,13 @@ function previewUrl(dev, imageId) {
   const params = new URLSearchParams({ t: String(imageId) });
   if (dev.key) params.set("key", dev.key);
   return `${dev.url}/api/v1/images/latest/preview.jpg?${params}`;
+}
+
+function framePreviewUrl(dev, imageId) {
+  const params = new URLSearchParams();
+  if (dev.key) params.set("key", dev.key);
+  const q = params.toString();
+  return `${dev.url}/api/v1/images/${encodeURIComponent(imageId)}/preview.jpg${q ? `?${q}` : ""}`;
 }
 
 // ---------- feeds: one poller per NINA, shared by all cards showing it ----------
@@ -1970,15 +1978,25 @@ const CARDS = {
     title: "Last frame",
     span: 2,
     tall: true,
-    needs: [],
+    needs: ["history"],
     mount(body, feed) {
       const img = el("img", {
-        alt: "Preview of the last saved frame",
+        alt: "Preview of the last saved frame. Activate to open the frame viewer.",
         hidden: true,
+        tabindex: "0",
+        role: "button",
       });
       const empty = el("div", { class: "muted", text: "No frame saved yet." });
       const dl = el("dl", { class: "kv" });
-      img.addEventListener("click", () => img.classList.toggle("zoom"));
+      let shownId = null;
+      const open = () => shownId != null && openFrameViewer(feed, shownId);
+      img.addEventListener("click", open);
+      img.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          open();
+        }
+      });
       img.addEventListener("load", () => {
         img.hidden = false;
         empty.hidden = true;
@@ -1987,7 +2005,6 @@ const CARDS = {
         empty.textContent = "Preview unavailable.";
       });
       body.append(el("div", { class: "preview" }, img, empty), dl);
-      let shownId = null;
       return () => {
         const i = feed.status.lastImage;
         if (!i) {
@@ -2135,6 +2152,17 @@ const CARDS = {
         opt("400", "400 steps"),
       );
       const pulses = el("input", { type: "checkbox", checked: true });
+      const bandKey = "nina-remote-telemetry.guideBand";
+      const band = el(
+        "select",
+        { "aria-label": "Target band" },
+        opt("0", "No target band"),
+        opt("0.5", "Target ±0.5″"),
+        opt("1", "Target ±1″"),
+        opt("1.5", "Target ±1.5″"),
+        opt("2", "Target ±2″"),
+      );
+      band.value = localStorage.getItem(bandKey) || "0";
       const canvas = el("canvas", { height: 200 });
       const stats = el("div", { class: "muted small" });
       const dl = el("dl", { class: "kv" });
@@ -2144,6 +2172,7 @@ const CARDS = {
           { class: "toolbar" },
           range,
           count,
+          band,
           el("label", { class: "small" }, pulses, " corrections"),
         ),
         canvas,
@@ -2161,16 +2190,39 @@ const CARDS = {
         dl,
       );
 
+      let hover = null;
+      let graph = { indexAt: () => null };
       const draw = () => {
-        stats.textContent = drawGuideGraph(
+        graph = drawGuideGraph(
           canvas,
           feed,
           Number(range.value),
           Number(count.value),
           pulses.checked,
+          Number(band.value),
+          hover,
         );
+        stats.textContent = graph.stats;
       };
-      [range, count, pulses].forEach((c) => c.addEventListener("change", draw));
+      band.addEventListener("change", () =>
+        localStorage.setItem(bandKey, band.value),
+      );
+      const onPoint = (e) => {
+        const i = graph.indexAt(e.offsetX);
+        if (i !== hover) {
+          hover = i;
+          draw();
+        }
+      };
+      canvas.addEventListener("pointermove", onPoint);
+      canvas.addEventListener("pointerdown", onPoint);
+      canvas.addEventListener("pointerleave", () => {
+        hover = null;
+        draw();
+      });
+      [range, count, pulses, band].forEach((c) =>
+        c.addEventListener("change", draw),
+      );
       const observer = new ResizeObserver(draw);
       observer.observe(canvas);
       onDispose(() => observer.disconnect());
@@ -2691,12 +2743,13 @@ function drawFocusCurve(canvas, report) {
   }
 }
 
-/** Draws RA/Dec error like NINA's guide graph. Returns an RMS summary of the shown window. */
-function drawGuideGraph(canvas, feed, range, count, showPulses) {
+/** Draws RA/Dec error like NINA's guide graph. Returns the RMS summary and a pixel-to-step lookup for hovering. */
+function drawGuideGraph(canvas, feed, range, count, showPulses, band, hover) {
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth;
   const h = 200;
-  if (!w) return "";
+  const none = { stats: "", indexAt: () => null };
+  if (!w) return none;
   canvas.width = w * dpr;
   canvas.height = h * dpr;
   const ctx = canvas.getContext("2d");
@@ -2728,6 +2781,12 @@ function drawGuideGraph(canvas, feed, range, count, showPulses) {
     pad.l + (count > 1 ? (i + (count - pts.length)) / (count - 1) : 0) * plotW;
   const y = (v) => mid - Math.max(-1, Math.min(1, v / yMax)) * half;
 
+  // Target band: the error you're happy with, in the graph's unit.
+  if (band > 0 && arcsec) {
+    ctx.fillStyle = "#2ecc7114";
+    ctx.fillRect(pad.l, y(band), plotW, y(-band) - y(band));
+  }
+
   // Grid at 0, ±half and ±full scale.
   ctx.strokeStyle = "#ffffff14";
   ctx.fillStyle = muted;
@@ -2747,7 +2806,7 @@ function drawGuideGraph(canvas, feed, range, count, showPulses) {
       pad.l + 8,
       mid - 8,
     );
-    return "";
+    return none;
   }
 
   if (showPulses) {
@@ -2797,11 +2856,46 @@ function drawGuideGraph(canvas, feed, range, count, showPulses) {
   line(raOf, raColor);
   line(decOf, decColor);
 
-  const rms = (f) =>
-    Math.sqrt(pts.reduce((s, p) => s + f(p) ** 2, 0) / pts.length);
-  const ra = rms(raOf);
-  const dec = rms(decOf);
-  return `RMS: RA ${ra.toFixed(2)}${unit} · Dec ${dec.toFixed(2)}${unit} · Total ${Math.hypot(ra, dec).toFixed(2)}${unit} (last ${pts.length} steps${arcsec ? "" : "; pixel scale unknown"})`;
+  const indexAt = (px) => {
+    const step = count > 1 ? plotW / (count - 1) : plotW;
+    const i = Math.round((px - pad.l) / step) - (count - pts.length);
+    return i >= 0 && i < pts.length ? i : null;
+  };
+
+  if (hover != null && pts[hover]) {
+    const p = pts[hover];
+    const hx = x(hover);
+    ctx.strokeStyle = "#ffffff55";
+    ctx.beginPath();
+    ctx.moveTo(hx, pad.t);
+    ctx.lineTo(hx, h - pad.b);
+    ctx.stroke();
+    const lines = [
+      new Date(p.time).toLocaleTimeString([], zoneOpts(feed.tz ?? null)),
+      `RA ${raOf(p).toFixed(2)}${unit}  Dec ${decOf(p).toFixed(2)}${unit}`,
+      `Pulse RA ${p.raPulseMs} ms  Dec ${p.decPulseMs} ms`,
+    ];
+    ctx.font = "11px system-ui";
+    const bw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 12;
+    const bh = lines.length * 14 + 8;
+    const left =
+      hx + 8 + bw > w - pad.r ? Math.max(pad.l, hx - 8 - bw) : hx + 8;
+    ctx.fillStyle = "#000000cc";
+    ctx.fillRect(left, pad.t + 4, bw, bh);
+    ctx.fillStyle = "#fff";
+    lines.forEach((l, k) => ctx.fillText(l, left + 6, pad.t + 18 + k * 14));
+  }
+
+  const rms = (list, f) =>
+    Math.sqrt(list.reduce((s, p) => s + f(p) ** 2, 0) / list.length);
+  const summary = (list) => {
+    const ra = rms(list, raOf);
+    const dec = rms(list, decOf);
+    return `RA ${ra.toFixed(2)}${unit} · Dec ${dec.toFixed(2)}${unit} · Total ${Math.hypot(ra, dec).toFixed(2)}${unit}`;
+  };
+  const recent = pts.slice(-20);
+  const stats = `RMS last ${recent.length}: ${summary(recent)}  |  last ${pts.length}: ${summary(pts)}${arcsec ? "" : " (pixel scale unknown)"}`;
+  return { stats, indexAt };
 }
 
 // ---------- views ----------
@@ -2850,6 +2944,7 @@ function buildCard(cfg, custom) {
   snap.addEventListener("click", () =>
     openSnapshot(section, `${dev.name} ${def.title}`, dev.name),
   );
+  if (custom && editMode) enableCardDrag(section, cfg);
   const collapseKey = custom
     ? `card:${cfg.id}`
     : `device:${cfg.deviceId}:${cfg.type}`;
@@ -2896,6 +2991,208 @@ function saveCollapsed(key, on) {
   const all = readJson(KEYS.collapsed, {});
   all[key] = on;
   localStorage.setItem(KEYS.collapsed, JSON.stringify(all));
+}
+
+// ---------- frame viewer ----------
+
+const viewer = {
+  feed: null,
+  list: [],
+  index: 0,
+  scale: 1,
+  tx: 0,
+  ty: 0,
+  fit: true,
+};
+
+// The plugin keeps previews of this many recent frames.
+const KEPT_PREVIEWS = 12;
+
+function viewerFrames(feed) {
+  return feed.history
+    .filter((i) => i.hasPreview)
+    .slice()
+    .reverse()
+    .slice(0, KEPT_PREVIEWS);
+}
+
+function viewerApply() {
+  const img = $("frameImg");
+  img.style.setProperty(
+    "transform",
+    `translate(${viewer.tx}px, ${viewer.ty}px) scale(${viewer.scale})`,
+  );
+}
+
+function viewerFit() {
+  const img = $("frameImg");
+  const stage = $("frameStage");
+  if (!img.naturalWidth) return;
+  viewer.scale = Math.min(
+    stage.clientWidth / img.naturalWidth,
+    stage.clientHeight / img.naturalHeight,
+    4,
+  );
+  viewer.tx = (stage.clientWidth - img.naturalWidth * viewer.scale) / 2;
+  viewer.ty = (stage.clientHeight - img.naturalHeight * viewer.scale) / 2;
+  viewer.fit = true;
+  viewerApply();
+}
+
+function viewerZoom(factor, cx, cy) {
+  const s = Math.min(8, Math.max(0.05, viewer.scale * factor));
+  // Keep the point under the cursor fixed.
+  viewer.tx = cx - ((cx - viewer.tx) * s) / viewer.scale;
+  viewer.ty = cy - ((cy - viewer.ty) * s) / viewer.scale;
+  viewer.scale = s;
+  viewer.fit = false;
+  viewerApply();
+}
+
+function viewerShow() {
+  const { feed, list, index } = viewer;
+  const frame = list[index];
+  $("frameCount").textContent = list.length
+    ? `${index + 1} / ${list.length}`
+    : "";
+  $("frameNewer").disabled = index <= 0;
+  $("frameOlder").disabled = index >= list.length - 1;
+  if (!frame) return;
+  $("frameMissing").hidden = true;
+  $("frameImg").hidden = false;
+  // The latest-preview endpoint works with every plugin version.
+  $("frameImg").src =
+    frame.id === feed.status?.lastImage?.id
+      ? previewUrl(feed.dev, frame.id)
+      : framePreviewUrl(feed.dev, frame.id);
+  $("frameImg").alt = `Preview of ${frame.fileName ?? "frame"}`;
+  withZone(feed, () => {
+    $("frameCaption").textContent = [
+      `${fmt.time(frame.timestampUtc)} (${fmt.ago(frame.timestampUtc)})`,
+      frame.target,
+      frame.filter,
+      fmt.num(frame.exposureSeconds, 0, "s"),
+      frame.hfr != null ? `HFR ${fmt.num(frame.hfr, 2)}` : null,
+      frame.stars != null ? `${frame.stars} stars` : null,
+      frame.ra ? `${frame.ra}  ${frame.dec}` : null,
+      frame.fileName,
+      viewer.legacy
+        ? "update the plugin on this NINA to browse recent frames"
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  });
+}
+
+function viewerStep(delta) {
+  const i = viewer.index + delta;
+  if (i < 0 || i >= viewer.list.length) return;
+  viewer.index = i;
+  viewerShow();
+}
+
+function openFrameViewer(feed, imageId) {
+  viewer.feed = feed;
+  // Older plugins mark every frame as having a preview but only serve the latest one.
+  viewer.legacy =
+    feed.history.filter((i) => i.hasPreview).length > KEPT_PREVIEWS;
+  viewer.list = viewer.legacy
+    ? feed.status?.lastImage
+      ? [feed.status.lastImage]
+      : []
+    : viewerFrames(feed);
+  if (!viewer.list.some((f) => f.id === imageId) && feed.status?.lastImage)
+    viewer.list.unshift(feed.status.lastImage);
+  viewer.index = Math.max(
+    0,
+    viewer.list.findIndex((f) => f.id === imageId),
+  );
+  $("frameDialog").showModal();
+  viewerShow();
+}
+
+function initFrameViewer() {
+  const stage = $("frameStage");
+  const img = $("frameImg");
+  img.addEventListener("load", () => viewerFit());
+  img.addEventListener("error", () => {
+    img.hidden = true;
+    $("frameMissing").textContent = viewer.legacy
+      ? "Preview unavailable. Update the Remote Telemetry plugin on this NINA to browse recent frames."
+      : `This preview is no longer kept. Only the ${KEPT_PREVIEWS} most recent frames are available.`;
+    $("frameMissing").hidden = false;
+  });
+  $("frameNewer").addEventListener("click", () => viewerStep(-1));
+  $("frameOlder").addEventListener("click", () => viewerStep(1));
+  $("frameFit").addEventListener("click", viewerFit);
+  $("frameActual").addEventListener("click", () => {
+    const r = stage.getBoundingClientRect();
+    viewerZoom(1 / viewer.scale, r.width / 2, r.height / 2);
+  });
+  $("frameClose").addEventListener("click", () => $("frameDialog").close());
+  $("frameDialog").addEventListener("keydown", (e) => {
+    if (e.key === "ArrowLeft") viewerStep(1);
+    else if (e.key === "ArrowRight") viewerStep(-1);
+    else if (e.key === "0") viewerFit();
+    else if (e.key === "1") $("frameActual").click();
+    else if (e.key === "+" || e.key === "=")
+      viewerZoom(1.25, stage.clientWidth / 2, stage.clientHeight / 2);
+    else if (e.key === "-")
+      viewerZoom(0.8, stage.clientWidth / 2, stage.clientHeight / 2);
+    else return;
+    e.preventDefault();
+  });
+  stage.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
+      viewerZoom(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.offsetX, e.offsetY);
+    },
+    { passive: false },
+  );
+  stage.addEventListener("dblclick", (e) => {
+    if (viewer.fit) viewerZoom(1 / viewer.scale, e.offsetX, e.offsetY);
+    else viewerFit();
+  });
+  // Drag to pan; two fingers to pinch-zoom.
+  const pointers = new Map();
+  let pinch = null;
+  stage.addEventListener("pointerdown", (e) => {
+    stage.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  });
+  stage.addEventListener("pointermove", (e) => {
+    const prev = pointers.get(e.pointerId);
+    if (!prev) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      const r = stage.getBoundingClientRect();
+      if (pinch)
+        viewerZoom(
+          dist / pinch,
+          (a.x + b.x) / 2 - r.left,
+          (a.y + b.y) / 2 - r.top,
+        );
+      pinch = dist;
+      return;
+    }
+    viewer.tx += e.clientX - prev.x;
+    viewer.ty += e.clientY - prev.y;
+    viewer.fit = false;
+    viewerApply();
+  });
+  const release = (e) => {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinch = null;
+  };
+  stage.addEventListener("pointerup", release);
+  stage.addEventListener("pointercancel", release);
+  window.addEventListener("resize", () => {
+    if ($("frameDialog").open && viewer.fit) viewerFit();
+  });
 }
 
 // ---------- card snapshots ----------
@@ -3216,6 +3513,72 @@ $("snapSave").addEventListener("click", () => {
   a.remove();
 });
 
+let dragCfg = null;
+
+// Desktop drag-and-drop; the ◀ ▶ buttons remain for touch and keyboard.
+function enableCardDrag(section, cfg) {
+  section.draggable = true;
+  section.addEventListener("dragstart", (e) => {
+    dragCfg = cfg;
+    section.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", cfg.id);
+  });
+  section.addEventListener("dragend", () => {
+    dragCfg = null;
+    section.classList.remove("dragging");
+    document
+      .querySelectorAll(".drop-before, .drop-after")
+      .forEach((c) => c.classList.remove("drop-before", "drop-after"));
+  });
+  const after = (e) => {
+    const r = section.getBoundingClientRect();
+    return e.clientX > r.left + r.width / 2;
+  };
+  section.addEventListener("dragover", (e) => {
+    if (!dragCfg || dragCfg === cfg) return;
+    e.preventDefault();
+    const a = after(e);
+    section.classList.toggle("drop-after", a);
+    section.classList.toggle("drop-before", !a);
+  });
+  section.addEventListener("dragleave", () =>
+    section.classList.remove("drop-before", "drop-after"),
+  );
+  section.addEventListener("drop", (e) => {
+    e.preventDefault();
+    if (!dragCfg || dragCfg === cfg) return;
+    const moved = dragCfg;
+    layout = layout.filter((c) => c !== moved);
+    const at = layout.indexOf(cfg) + (after(e) ? 1 : 0);
+    layout.splice(at, 0, moved);
+    saveLayout();
+    renderView();
+  });
+}
+
+function defaultLayout() {
+  return devices.flatMap((d) =>
+    ["session", "frame", "guiding", "chart"].map((type) => ({
+      id: newId(),
+      type,
+      deviceId: d.id,
+      span: CARDS[type].span,
+    })),
+  );
+}
+
+function resetLayout() {
+  if (
+    layout.length &&
+    !confirm("Replace your dashboard with the default cards for each NINA?")
+  )
+    return;
+  layout = defaultLayout();
+  saveLayout();
+  renderView();
+}
+
 function editTools(cfg) {
   const move = (delta) => {
     const i = layout.indexOf(cfg);
@@ -3239,34 +3602,26 @@ function editTools(cfg) {
     saveLayout();
     renderView();
   };
-  return el(
-    "span",
-    { class: "tools" },
-    el(
-      "button",
-      { type: "button", title: "Move earlier", onclick: () => move(-1) },
-      "◀",
-    ),
-    el(
-      "button",
-      { type: "button", title: "Move later", onclick: () => move(1) },
-      "▶",
-    ),
-    el(
-      "button",
-      { type: "button", title: "Change width", onclick: resize },
-      "⇔",
-    ),
+  const tool = (label, symbol, onclick, cls) =>
     el(
       "button",
       {
         type: "button",
-        title: "Remove card",
-        class: "danger",
-        onclick: remove,
+        title: label,
+        "aria-label": label,
+        class: cls,
+        onclick,
       },
-      "✕",
-    ),
+      symbol,
+    );
+  const name = CARDS[cfg.type].title;
+  return el(
+    "span",
+    { class: "tools" },
+    tool(`Move ${name} earlier`, "◀", () => move(-1)),
+    tool(`Move ${name} later`, "▶", () => move(1)),
+    tool(`Change width of ${name}`, "⇔", resize),
+    tool(`Remove ${name}`, "✕", remove, "danger"),
   );
 }
 
@@ -3299,6 +3654,7 @@ function renderView() {
   $("editBtn").hidden = !custom || !hasDevices;
   $("editBtn").textContent = editMode ? "Done" : "Edit layout";
   $("addCardBtn").hidden = !custom || !editMode;
+  $("resetLayoutBtn").hidden = !custom || !editMode;
   document.body.classList.toggle("editing", custom && editMode);
   renderViewSelect();
   renderChips();
@@ -3324,6 +3680,12 @@ function renderView() {
             { type: "button", class: "primary", onclick: openCardDialog },
             "Add card",
           ),
+          " ",
+          el(
+            "button",
+            { type: "button", onclick: resetLayout },
+            "Use the default layout",
+          ),
         ),
       );
       return;
@@ -3335,7 +3697,12 @@ function renderView() {
     const tabButton = (id, label) => {
       const b = el(
         "button",
-        { type: "button", class: `tab${deviceTab === id ? " active" : ""}` },
+        {
+          type: "button",
+          class: `tab${deviceTab === id ? " active" : ""}`,
+          role: "tab",
+          "aria-selected": String(deviceTab === id),
+        },
         label,
       );
       b.addEventListener("click", () => {
@@ -3348,7 +3715,7 @@ function renderView() {
     const tsTab = tabButton("ts", "Target Scheduler");
     const nav = el(
       "nav",
-      { class: "tabs span-4" },
+      { class: "tabs span-4", role: "tablist", "aria-label": "Card groups" },
       tabButton("overview", "Overview"),
       tsTab,
     );
@@ -3361,6 +3728,7 @@ function renderView() {
     unmounts.push(feed.subscribe({ needs: [], update: syncTsTab }));
     view.append(
       nav,
+      buildStrip(feed),
       ...Object.entries(CARDS)
         .filter(([, def]) => (def.tabs ?? ["overview"]).includes(deviceTab))
         .map(([type, def]) =>
@@ -3375,6 +3743,171 @@ function setView(view) {
   editMode = false;
   saveView();
   renderView();
+}
+
+// ---------- at-a-glance strip (Full view) ----------
+
+/** Sun altitude in degrees (low-precision solar position, good to about a minute for twilight times). */
+function sunAltitude(date, lat, lon) {
+  const rad = Math.PI / 180;
+  const d = date.getTime() / 86400000 - 10957.5; // days since J2000.0
+  const g = (357.529 + 0.98560028 * d) * rad;
+  const q = 280.459 + 0.98564736 * d;
+  const L = (q + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g)) * rad;
+  const e = (23.439 - 0.00000036 * d) * rad;
+  const ra = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L));
+  const dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const gmst = 18.697374558 + 24.06570982441908 * d;
+  const ha = ((gmst * 15 + lon) % 360) * rad - ra;
+  return (
+    Math.asin(
+      Math.sin(lat * rad) * Math.sin(dec) +
+        Math.cos(lat * rad) * Math.cos(dec) * Math.cos(ha),
+    ) / rad
+  );
+}
+
+/** Next time astronomical darkness starts or ends, within 30 hours. */
+function nextDarkChange(lat, lon, now = new Date()) {
+  const dark = (t) => sunAltitude(t, lat, lon) < -18;
+  const startDark = dark(now);
+  const lo = now.getTime();
+  for (let t = lo + 120000; t < lo + 30 * 3600000; t += 120000) {
+    if (dark(new Date(t)) !== startDark) {
+      let a = t - 120000;
+      let b = t;
+      while (b - a > 15000) {
+        const m = (a + b) / 2;
+        if (dark(new Date(m)) === startDark) a = m;
+        else b = m;
+      }
+      return { dark: startDark, at: new Date(b) };
+    }
+  }
+  return { dark: startDark, at: null };
+}
+
+function buildStrip(feed) {
+  const strip = el("div", {
+    class: "strip span-4",
+    role: "status",
+    "aria-label": "At a glance",
+  });
+  let twilight = null;
+  let twilightAt = 0;
+  const chip = (label, value, tone, title) =>
+    value == null || value === ""
+      ? null
+      : el(
+          "span",
+          { class: `strip-item ${tone || ""}`, title: title || null },
+          el("span", { class: "strip-label", text: label }),
+          el("span", { class: "strip-value", text: value }),
+        );
+  const hfrTrend = () => {
+    const lights = feed.history.filter(
+      (i) => (i.imageType || "").toUpperCase() === "LIGHT" && i.hfr != null,
+    );
+    if (!lights.length) return null;
+    const last = lights.at(-1).hfr;
+    const recent = lights.slice(-5);
+    const before = lights.slice(-10, -5);
+    if (!before.length) return { text: last.toFixed(2), tone: "" };
+    const avg = (l) => l.reduce((s, i) => s + i.hfr, 0) / l.length;
+    const change = (avg(recent) - avg(before)) / avg(before);
+    const arrow = change > 0.03 ? "↑" : change < -0.03 ? "↓" : "→";
+    return {
+      text: `${last.toFixed(2)} ${arrow} ${change >= 0 ? "+" : ""}${Math.round(change * 100)}%`,
+      tone: change > 0.1 ? "warn" : "",
+    };
+  };
+  const render = () => {
+    const st = feed.status;
+    if (!st) return;
+    const { safety: s, sequence, devices: eq, info } = st;
+    const ts = st.scheduler;
+    const target =
+      ts?.enabled && ts.state === "imaging" && ts.target
+        ? ts.target
+        : sequence.activeTarget;
+    const filter = eq.filterWheel?.connected ? eq.filterWheel.filter : null;
+    const cam = eq.camera;
+    const exposing =
+      cam?.connected && cam.isExposing && cam.exposureEndUtc
+        ? `${Math.max(0, Math.round((new Date(cam.exposureEndUtc) - Date.now()) / 1000))}s left`
+        : null;
+    const rms = eq.guider?.connected ? eq.guider.rms?.totalArcsec : null;
+    const m = eq.mount;
+    const flipH = m?.connected && m.tracking ? m.timeToMeridianFlipHours : null;
+    const lat = info.location?.latitude;
+    const lon = info.location?.longitude;
+    if (lat != null && lon != null && Date.now() - twilightAt > 60000) {
+      twilight = nextDarkChange(lat, lon);
+      twilightAt = Date.now();
+    }
+    const hfr = feed.history.length ? hfrTrend() : null;
+    const flipText =
+      flipH == null || flipH <= 0 || flipH > 24
+        ? null
+        : `in ${fmt.duration(flipH * 3600)}`;
+    strip.replaceChildren(
+      ...[
+        chip(
+          "Safety",
+          s.state === "unknown" ? "n/a" : s.isSafe ? "Safe" : "UNSAFE",
+          s.state === "unknown" ? "" : s.isSafe ? "ok" : "bad",
+        ),
+        chip(
+          "Sequence",
+          sequence.isRunning
+            ? exposing
+              ? `Exposing · ${exposing}`
+              : "Running"
+            : "Idle",
+          sequence.isRunning ? "ok" : "",
+        ),
+        chip("Target", [target, filter].filter(Boolean).join(" · ")),
+        chip(
+          "Guiding RMS",
+          rms != null
+            ? `${rms.toFixed(2)}″`
+            : eq.guider?.connected
+              ? "—"
+              : null,
+          rms == null ? "" : rms > 2 ? "bad" : rms > 1.2 ? "warn" : "ok",
+        ),
+        chip(
+          "HFR",
+          hfr?.text,
+          hfr?.tone,
+          "Last light frame; trend of the last 5 vs the 5 before",
+        ),
+        chip(
+          "Meridian flip",
+          flipText,
+          flipH != null && flipH < 0.25 ? "warn" : "",
+        ),
+        twilight?.at
+          ? chip(
+              twilight.dark ? "Dawn" : "Dark",
+              `${fmt.until(twilight.at.toISOString())} (${fmt.hm(twilight.at.toISOString(), feed.tz ?? null)})`,
+              "",
+              "Astronomical twilight (sun 18° below the horizon) at the observatory",
+            )
+          : null,
+      ].filter(Boolean),
+    );
+  };
+  unmounts.push(
+    feed.subscribe({
+      needs: ["history"],
+      update: (kind) => {
+        if (kind === "status" || kind === "history" || kind === "all")
+          withZone(feed, render);
+      },
+    }),
+  );
+  return strip;
 }
 
 // ---------- dialogs ----------
@@ -3669,14 +4202,24 @@ function openConfig() {
 // ---------- boot ----------
 
 async function init() {
-  if (localStorage.getItem(KEYS.night) === "1")
-    document.body.classList.add("night");
-  $("nightBtn").addEventListener("click", () => {
-    localStorage.setItem(
-      KEYS.night,
-      document.body.classList.toggle("night") ? "1" : "0",
-    );
-  });
+  const toggle = (btnId, cls, key) => {
+    const apply = (on) => {
+      document.body.classList.toggle(cls, on);
+      $(btnId).setAttribute("aria-pressed", String(on));
+    };
+    apply(localStorage.getItem(key) === "1");
+    $(btnId).addEventListener("click", () => {
+      const on = !document.body.classList.contains(cls);
+      apply(on);
+      localStorage.setItem(key, on ? "1" : "0");
+      // Canvases size themselves from their element, so redraw at the new size.
+      if (cls === "compact") renderView();
+    });
+  };
+  toggle("nightBtn", "night", KEYS.night);
+  toggle("compactBtn", "compact", KEYS.compact);
+  $("resetLayoutBtn").addEventListener("click", resetLayout);
+  initFrameViewer();
   $("timeMode").value = timeMode;
   $("timeMode").addEventListener("change", (e) => {
     timeMode = e.target.value;

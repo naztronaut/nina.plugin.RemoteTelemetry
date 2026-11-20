@@ -50,18 +50,18 @@ namespace Naztronomy.NINA.RemoteTelemetry.Telemetry {
     }
 
     /// <summary>
-    /// Listens to NINA's ImageSaved event and keeps a short history of frame metadata plus a JPEG
-    /// preview of the most recent frame.
+    /// Listens to NINA's ImageSaved event and keeps a short history of frame metadata plus JPEG
+    /// previews of the most recent frames.
     /// </summary>
     public sealed class ImageTracker : IDisposable {
         private const int MaxHistory = 300;
+        private const int MaxPreviews = 12;
 
         private readonly IImageSaveMediator imageSaveMediator;
         private readonly Func<int> previewMaxWidth;
         private readonly object sync = new object();
         private readonly List<ImageRecord> history = new List<ImageRecord>();
-        private byte[] previewJpeg;
-        private int previewImageId;
+        private readonly List<(ImageRecord Record, byte[] Jpeg)> previews = new List<(ImageRecord, byte[])>();
         private int nextId = 1;
 
         public ImageTracker(IImageSaveMediator imageSaveMediator, Func<int> previewMaxWidth) {
@@ -107,10 +107,13 @@ namespace Naztronomy.NINA.RemoteTelemetry.Telemetry {
                     return;
                 }
                 lock (sync) {
-                    if (record.Id >= previewImageId) {
-                        previewJpeg = jpeg;
-                        previewImageId = record.Id;
-                        record.HasPreview = true;
+                    // Encoding runs in parallel, so keep the list ordered by image id.
+                    var at = previews.FindIndex(p => p.Record.Id > record.Id);
+                    previews.Insert(at < 0 ? previews.Count : at, (record, jpeg));
+                    record.HasPreview = true;
+                    while (previews.Count > MaxPreviews) {
+                        previews[0].Record.HasPreview = false;
+                        previews.RemoveAt(0);
                     }
                 }
             } catch (Exception ex) {
@@ -172,7 +175,13 @@ namespace Naztronomy.NINA.RemoteTelemetry.Telemetry {
 
         public (byte[] Jpeg, int ImageId) GetPreview() {
             lock (sync) {
-                return (previewJpeg, previewImageId);
+                return previews.Count > 0 ? (previews[^1].Jpeg, previews[^1].Record.Id) : (null, 0);
+            }
+        }
+
+        public byte[] GetPreview(int imageId) {
+            lock (sync) {
+                return previews.FirstOrDefault(p => p.Record.Id == imageId).Jpeg;
             }
         }
 

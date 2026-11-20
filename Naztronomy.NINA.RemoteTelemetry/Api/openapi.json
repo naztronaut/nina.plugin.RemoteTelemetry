@@ -351,6 +351,41 @@
         }
       }
     },
+    "/api/v1/images/{id}/preview.jpg": {
+      "get": {
+        "tags": ["Images"],
+        "summary": "JPEG preview of a recent frame",
+        "description": "Previews of the 12 most recent frames are kept; `hasPreview` in /api/v1/images tells which ones. Previews never change, so they may be cached.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" },
+            "description": "Image id from /api/v1/images"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JPEG image",
+            "content": {
+              "image/jpeg": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": {
+            "description": "No preview kept for that image",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/logs": {
       "get": {
         "tags": ["Logs"],

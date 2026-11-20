@@ -206,6 +206,23 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
                     }
             }
 
+            const string imagesPrefix = "/api/v1/images/";
+            if (path.StartsWith(imagesPrefix, StringComparison.OrdinalIgnoreCase) && path.EndsWith("/preview.jpg", StringComparison.OrdinalIgnoreCase)) {
+                var idText = path.Substring(imagesPrefix.Length, path.Length - imagesPrefix.Length - "/preview.jpg".Length);
+                if (!int.TryParse(idText, out var previewId)) {
+                    return Error(400, "Image id must be a number.");
+                }
+                var bytes = images.GetPreview(previewId);
+                if (bytes == null) {
+                    return Error(404, "No preview for that image (only the most recent frames are kept).");
+                }
+                var preview = new HttpResponse { ContentType = "image/jpeg", Body = bytes };
+                // Previews of a given id never change.
+                preview.Headers["Cache-Control"] = "private, max-age=3600";
+                preview.Headers["X-Image-Id"] = previewId.ToString();
+                return preview;
+            }
+
             const string statsPrefix = "/api/v1/scheduler/targets/";
             if (path.StartsWith(statsPrefix, StringComparison.OrdinalIgnoreCase) && path.EndsWith("/statistics", StringComparison.OrdinalIgnoreCase)) {
                 // Only a parsed GUID is ever forwarded to the TS API.

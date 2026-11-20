@@ -55,6 +55,12 @@ Each NINA is polled once no matter how many cards use it.
 
 Each card's camera button saves a snapshot of that card as JPG or copies it to the clipboard (copying needs an `https://` or `localhost` page).
 
+- **At a glance**: the Full view starts with a strip showing safety, sequence/exposure, target and filter, guiding RMS, HFR trend, time to the meridian flip and time to astronomical dawn/dark at the observatory.
+- **Cards** can be collapsed with the chevron (Log and Errors & warnings start collapsed). In **Edit layout**, drag cards to reorder them (or use ◀ ▶), and **Reset layout** restores the default cards.
+- **Last frame**: click the preview to open a viewer with zoom (wheel, pinch, +/−, double-click), pan (drag) and the 12 most recent frames (← →).
+- **Guiding**: hover or tap the graph for a step's values; an optional target band shades the error you're happy with; RMS is shown for the last 20 steps and for the visible window.
+- **Compact** (top bar) shrinks text and spacing for small screens or wall displays.
+
 ### Hosted dashboard
 
 The [nina-remote-telemetry-web](../nina-remote-telemetry-web) repo builds the same dashboard as a static Astro site for Cloudflare Pages (or any static host), so you can open your observatories from a domain. Because that site is https, each NINA needs the **HTTPS on your tailnet** option above, and its **Allowed origins** should include the site's address.
@@ -76,6 +82,7 @@ All responses are JSON (camelCase, UTC timestamps, `null` for unavailable values
 | `GET /api/v1/images?limit=50`                      | Metadata of recent saved frames (max 300, since NINA start)                                                                                                                                    |
 | `GET /api/v1/images/latest`                        | Metadata of the last saved frame                                                                                                                                                               |
 | `GET /api/v1/images/latest/preview.jpg`            | JPEG preview of the last saved frame (`X-Image-Id` header)                                                                                                                                     |
+| `GET /api/v1/images/{id}/preview.jpg`              | JPEG preview of one of the 12 most recent frames (`hasPreview` in `/api/v1/images`)                                                                                                            |
 | `GET /api/v1/logs?limit=200&level=Info&after=<id>` | Log tail; `after` returns only newer entries                                                                                                                                                   |
 | `GET /api/v1/issues?limit=100`                     | Recent warnings/errors/fatals                                                                                                                                                                  |
 | `GET /api/v1/guiding?after=<unixMs>&limit=600`     | Guide steps (RA/Dec error in px and ″, correction pulses in ms) and dither times; `after` returns only newer steps                                                                             |
