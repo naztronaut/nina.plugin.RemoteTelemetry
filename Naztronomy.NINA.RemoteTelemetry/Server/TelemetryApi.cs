@@ -52,11 +52,13 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
         private readonly AllSkyService allSky;
         private readonly SequenceTracker sequenceTracker;
         private readonly AutoFocusTracker autoFocus;
+        private readonly GuideHistoryTracker guideHistory;
         private readonly Func<double?> guiderPixelScale;
         private readonly Func<string> apiKey;
         private readonly Func<string> allowedOrigins;
 
-        public TelemetryApi(TelemetryCollector collector, ImageTracker images, LogTracker logs, GuideTracker guiding, TargetSchedulerTracker scheduler, AllSkyService allSky, SequenceTracker sequenceTracker, AutoFocusTracker autoFocus, Func<double?> guiderPixelScale, Func<string> apiKey, Func<string> allowedOrigins) {
+        public TelemetryApi(TelemetryCollector collector, ImageTracker images, LogTracker logs, GuideTracker guiding, TargetSchedulerTracker scheduler, AllSkyService allSky, SequenceTracker sequenceTracker, AutoFocusTracker autoFocus, Func<double?> guiderPixelScale, Func<string> apiKey, Func<string> allowedOrigins, GuideHistoryTracker guideHistory = null) {
+            this.guideHistory = guideHistory ?? new GuideHistoryTracker();
             this.collector = collector;
             this.images = images;
             this.logs = logs;
@@ -169,6 +171,9 @@ namespace Naztronomy.NINA.RemoteTelemetry.Server {
                 case "/api/v1/guiding":
                     long.TryParse(req.QueryValue("after"), out var afterMs);
                     return Json(guiding.Get(afterMs, req.QueryInt("limit", 600, 1, 1200), guiderPixelScale()));
+
+                case "/api/v1/guiding/history":
+                    return Json(guideHistory.Get());
 
                 case "/api/v1/scheduler":
                     return Json(scheduler.GetNow());

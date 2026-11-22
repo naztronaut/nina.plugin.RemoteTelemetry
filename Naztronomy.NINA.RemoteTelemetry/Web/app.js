@@ -260,6 +260,7 @@ class Feed {
     this.progress = null;
     this.seqTargets = null;
     this.autofocus = null;
+    this.guideHistory = null;
     this.lastImageId = undefined;
     this.lastIssueId = undefined;
     this.startedUtc = null;
@@ -277,6 +278,7 @@ class Feed {
       if (sub.needs.includes("progress")) this.fetchProgress();
       if (sub.needs.includes("seqTargets")) this.fetchSeqTargets();
       if (sub.needs.includes("autofocus")) this.fetchAutofocus();
+      if (sub.needs.includes("guideHistory")) this.fetchGuideHistory();
     }
     return () => {
       this.subs.delete(sub);
@@ -306,6 +308,8 @@ class Feed {
     this.seqTimer = setInterval(() => this.fetchSeqTargets(), 30000);
     this.fetchAutofocus();
     this.afTimer = setInterval(() => this.fetchAutofocus(), 60000);
+    this.fetchGuideHistory();
+    this.ghTimer = setInterval(() => this.fetchGuideHistory(), 120000);
   }
 
   stop() {
@@ -316,6 +320,7 @@ class Feed {
     clearInterval(this.progressTimer);
     clearInterval(this.seqTimer);
     clearInterval(this.afTimer);
+    clearInterval(this.ghTimer);
     clearTimeout(this.planRetry);
   }
 
@@ -452,6 +457,22 @@ class Feed {
       this.emit("autofocus");
     } catch {
       /* surfaced by status poll */
+    }
+  }
+
+  async fetchGuideHistory() {
+    if (!this.needs("guideHistory")) return;
+    try {
+      this.guideHistory = await api(this.dev, "/api/v1/guiding/history", 30000);
+      this.emit("guideHistory");
+    } catch (e) {
+      // Older plugins have no such endpoint; keep any earlier result on a blip.
+      if (this.guideHistory?.nights?.length) return;
+      this.guideHistory = {
+        available: true,
+        error: `${e.message}. If this persists, update the plugin on this NINA PC.`,
+      };
+      this.emit("guideHistory");
     }
   }
 
@@ -1131,6 +1152,8 @@ const CARDS = {
       const err = el("span", { class: "error small" });
       const summaryLine = el("div", { class: "small ts-summary" });
       const container = el("div", { class: "ts-projects" });
+      const expandAll = el("button", { type: "button" }, "Expand all");
+      const collapseAll = el("button", { type: "button" }, "Collapse all");
       body.append(
         el(
           "div",
@@ -1138,6 +1161,8 @@ const CARDS = {
           el("label", { class: "small" }, showDone, " show completed"),
           el("label", { class: "small" }, showAll, " show inactive"),
           sortBy,
+          expandAll,
+          collapseAll,
           info,
           err,
         ),
@@ -1145,12 +1170,34 @@ const CARDS = {
         container,
       );
       const expanded = new Set();
+      // Projects start collapsed so the top level reads as a list of projects.
+      const openKey = "nina-remote-telemetry.tsOpenProjects";
+      const openProjects = new Set(readJson(openKey, []));
+      const saveOpen = () =>
+        localStorage.setItem(openKey, JSON.stringify([...openProjects]));
+      const projectKey = (pr) => `${feed.dev.id}:${pr.id ?? pr.name}`;
       const statsCache = new Map();
       let runningKey = null;
       let autoExpandedKey = null;
 
       const PRIORITY = ["Low priority", "Normal priority", "High priority"];
       const priorityLabel = (p) => PRIORITY[p] ?? `priority ${p}`;
+      const liveDot = (name) =>
+        el("span", {
+          class: "ts-live",
+          role: "img",
+          title: `Imaging: ${name}`,
+          "aria-label": `Imaging ${name}`,
+        });
+      // Avoid "RCW105 · RCW 105" when one name already contains the other.
+      const rowName = (project, target) => {
+        const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+        const a = norm(project);
+        const b = norm(target);
+        if (a.includes(b)) return project;
+        if (b.includes(a)) return target;
+        return `${project} · ${target}`;
+      };
 
       const bar = (pct) => {
         const fill = el("div", {
@@ -1312,8 +1359,8 @@ const CARDS = {
         }
       };
 
-      // pr is passed when a single-target project is shown as one row.
-      const targetBlock = (t, pr) => {
+      // pr is passed when a project is shown as one row; note marks hidden siblings.
+      const targetBlock = (t, pr, note) => {
         const merged = mergeFilters(t.filters);
         const remaining = merged.filter((f) => f.remaining > 0);
         const rows = showDone.checked ? merged : remaining;
@@ -1360,8 +1407,9 @@ const CARDS = {
           if (nowOpen) fill();
         });
 
-        const name =
+        const fullName =
           pr && pr.name !== t.name ? `${pr.name} · ${t.name}` : t.name;
+        const name = pr ? rowName(pr.name, t.name) : t.name;
         const running = runningKey === `${pr?.name ?? t.projectName}|${t.name}`;
         return el(
           "div",
@@ -1370,18 +1418,28 @@ const CARDS = {
           },
           el(
             "div",
-            { class: "ts-target-head" },
-            el("strong", { text: name, title: name }),
-            running ? el("span", { class: "pill ok", text: "Imaging" }) : null,
-            pr && pr.state !== "Active"
-              ? el("span", { class: "pill", text: pr.state })
-              : null,
-            pr
-              ? el("span", {
-                  class: "muted small",
-                  text: priorityLabel(pr.priority),
-                })
-              : null,
+            { class: "ts-target-head ts-row" },
+            el("span"),
+            el(
+              "span",
+              { class: "ts-name" },
+              el("strong", { text: name, title: fullName }),
+              running ? liveDot(t.name) : null,
+              pr && pr.state !== "Active"
+                ? el("span", { class: "pill", text: pr.state })
+                : null,
+              note
+                ? el("span", {
+                    class: "muted small ts-note",
+                    text: note.text,
+                    title: note.title,
+                  })
+                : null,
+            ),
+            el("span", {
+              class: "muted small ts-prio",
+              text: pr ? priorityLabel(pr.priority) : "",
+            }),
             bar(t.percentComplete ?? 0),
             el("span", {
               class: "small ts-pct",
@@ -1499,46 +1557,119 @@ const CARDS = {
             const hasRunning = pr.visible.some(
               (t) => `${pr.name}|${t.name}` === runningKey,
             );
-            // A project with a single target reads better as one row.
-            if (pr.targets.length === 1 && pr.visible.length === 1)
+            // One visible target reads better as one row; "show completed" brings back the group.
+            if (
+              pr.visible.length === 1 &&
+              (pr.targets.length === 1 || !showDone.checked)
+            ) {
+              const hidden = pr.targets.length - 1;
               return el(
                 "section",
                 { class: `ts-project single${hasRunning ? " now" : ""}` },
-                targetBlock({ ...pr.visible[0], projectName: pr.name }, pr),
+                targetBlock(
+                  { ...pr.visible[0], projectName: pr.name },
+                  pr,
+                  hidden > 0
+                    ? {
+                        text: `1 of ${pr.targets.length}`,
+                        title: `${hidden} other target${hidden === 1 ? " is" : "s are"} complete or inactive. Tick “show completed” to list them.`,
+                      }
+                    : null,
+                ),
               );
-            return el(
-              "section",
-              { class: `ts-project${hasRunning ? " now" : ""}` },
+            }
+            const key = projectKey(pr);
+            const open = openProjects.has(key);
+            const running = pr.visible.find(
+              (t) => `${pr.name}|${t.name}` === runningKey,
+            );
+            const chev = el("button", {
+              type: "button",
+              class: "ts-chev",
+              "aria-expanded": String(open),
+              "aria-label": `${open ? "Collapse" : "Expand"} ${pr.name}`,
+            });
+            const toggle = () => {
+              if (openProjects.has(key)) openProjects.delete(key);
+              else openProjects.add(key);
+              saveOpen();
+              withZone(feed, render);
+            };
+            const shown = pr.visible.length;
+            const total = pr.targets.length;
+            const imaged = projectImaged(pr);
+            const details = [
+              shown < total
+                ? `${shown} of ${total} targets`
+                : `${total} target${total === 1 ? "" : "s"}`,
+              pr.percentComplete == null
+                ? "no exposures planned"
+                : pr.remainingSeconds > 0
+                  ? `${fmt.long(pr.remainingSeconds)} left`
+                  : "complete ✓",
+              imaged > 0 ? `${fmt.long(imaged)} imaged` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ");
+            const header = el(
+              "header",
+              {
+                class: "ts-row",
+                title: open ? "Click to collapse" : "Click to show targets",
+              },
+              chev,
               el(
-                "header",
-                null,
+                "span",
+                { class: "ts-name" },
                 el("strong", { text: pr.name }),
+                !open && running ? liveDot(running.name) : null,
                 pr.state !== "Active"
                   ? el("span", { class: "pill", text: pr.state })
                   : null,
-                el("span", {
-                  class: "muted small",
-                  text: priorityLabel(pr.priority),
-                }),
-                bar(pr.percentComplete ?? 0),
-                el("span", {
-                  class: "small",
-                  text:
-                    pr.percentComplete == null
-                      ? "no exposures planned"
-                      : `${fmt.num(pr.percentComplete, 0)}% · ${pr.remainingSeconds > 0 ? `${fmt.long(pr.remainingSeconds)} left` : "complete"}${projectImaged(pr) > 0 ? ` · ${fmt.long(projectImaged(pr))} imaged` : ""}`,
-                }),
               ),
-              ...(pr.visible.length
-                ? pr.visible.map((t) =>
-                    targetBlock({ ...t, projectName: pr.name }),
+              el("span", {
+                class: "muted small ts-prio",
+                text: priorityLabel(pr.priority),
+              }),
+              bar(pr.percentComplete ?? 0),
+              el("span", {
+                class: "small ts-pct",
+                text:
+                  pr.percentComplete == null
+                    ? "—"
+                    : `${fmt.num(pr.percentComplete, 0)}%`,
+              }),
+              el("span", {
+                class: "small ts-remaining",
+                text: details,
+                title: details,
+              }),
+            );
+            header.addEventListener("click", (e) => {
+              if (e.target === chev || !e.target.closest("button")) toggle();
+            });
+            return el(
+              "section",
+              {
+                class: `ts-project${hasRunning ? " now" : ""}${open ? "" : " closed"}`,
+              },
+              header,
+              open
+                ? el(
+                    "div",
+                    { class: "ts-children" },
+                    ...(shown
+                      ? pr.visible.map((t) =>
+                          targetBlock({ ...t, projectName: pr.name }),
+                        )
+                      : [
+                          el("div", {
+                            class: "muted small",
+                            text: "No targets to show.",
+                          }),
+                        ]),
                   )
-                : [
-                    el("div", {
-                      class: "muted small",
-                      text: "No targets to show.",
-                    }),
-                  ]),
+                : null,
             );
           }),
         );
@@ -1557,6 +1688,18 @@ const CARDS = {
           withZone(feed, render);
         });
       }
+      const multiTarget = () =>
+        (feed.progress?.projects || []).filter((pr) => pr.targets.length > 1);
+      expandAll.addEventListener("click", () => {
+        for (const pr of multiTarget()) openProjects.add(projectKey(pr));
+        saveOpen();
+        withZone(feed, render);
+      });
+      collapseAll.addEventListener("click", () => {
+        for (const pr of multiTarget()) openProjects.delete(projectKey(pr));
+        saveOpen();
+        withZone(feed, render);
+      });
       return (kind) => {
         if (kind === "status") {
           const ts = feed.status.scheduler;
@@ -2265,6 +2408,164 @@ const CARDS = {
           ],
           ["Pixel scale", fmt.num(g.pixelScale, 2, "″/px")],
         ]);
+      };
+    },
+  },
+
+  guideHistory: {
+    title: "Guiding history",
+    span: 2,
+    needs: ["guideHistory"],
+    // Hidden in Full view when the NINA PC has no PHD2 log folder.
+    available: (feed) => !feed.guideHistory || feed.guideHistory.available,
+    mount(body, feed) {
+      const head = el("div", { class: "gh-summary" });
+      const table = el("div", { class: "tablewrap" });
+      const note = el("div", { class: "muted small" });
+      body.append(head, table, note);
+
+      let rendered = false;
+      const render = () => {
+        const gh = feed.guideHistory;
+        if (!gh) {
+          head.textContent = "Loading…";
+          return;
+        }
+        rendered = true;
+        if (gh.error || !gh.available) {
+          head.textContent = gh.error
+            ? `Could not read PHD2 guide logs: ${gh.error}`
+            : `No PHD2 log folder found at ${gh.folder}.`;
+          table.replaceChildren();
+          note.textContent = "";
+          return;
+        }
+        // Cells above the guiding card's target band are highlighted.
+        const band = Number(
+          localStorage.getItem("nina-remote-telemetry.guideBand") || 0,
+        );
+        const arc = (v) => (v == null ? "—" : `${fmt.num(v, 2)}″`);
+        const nights = gh.nights || [];
+        head.replaceChildren(
+          ...nights.map((n) =>
+            el(
+              "div",
+              { class: "gh-night" },
+              el("span", { class: "muted small", text: n.label }),
+              el("strong", {
+                class: band && n.overall.total > band ? "gh-over" : "",
+                text:
+                  n.overall.frames > 0 ? `${arc(n.overall.total)} RMS` : "—",
+              }),
+              el("span", {
+                class: "muted small",
+                text:
+                  n.overall.frames > 0
+                    ? `RA ${arc(n.overall.ra)} · Dec ${arc(n.overall.dec)} · ${n.overall.frames.toLocaleString()} frames`
+                    : "No guiding logged",
+              }),
+            ),
+          ),
+        );
+
+        // Rows line up by hour of the night so the two nights compare side by side.
+        const H = 3600000;
+        const rows = new Map();
+        nights.forEach((n, i) => {
+          const start = Date.parse(n.startUtc);
+          for (const h of n.hours) {
+            const offset = Math.round((Date.parse(h.startUtc) - start) / H);
+            if (!rows.has(offset))
+              rows.set(offset, { at: h.startUtc, cells: [] });
+            rows.get(offset).cells[i] = h;
+          }
+        });
+        if (!rows.size) {
+          table.replaceChildren(
+            el("div", {
+              class: "muted small",
+              text: "No guiding in PHD2's logs for tonight or last night.",
+            }),
+          );
+          note.textContent = "";
+          return;
+        }
+        const cells = (h) => {
+          if (!h || !h.frames)
+            return [
+              el("td", { class: "num muted", text: "—" }),
+              el("td", { class: "num muted", text: "" }),
+              el("td", {
+                class: "num muted",
+                text: h?.dropped ? `${h.dropped} lost` : "",
+              }),
+            ];
+          return [
+            el("td", {
+              class: `num gh-total${band && h.total > band ? " gh-over" : ""}`,
+              text: arc(h.total),
+            }),
+            el("td", { class: "num", text: `${arc(h.ra)} / ${arc(h.dec)}` }),
+            el("td", {
+              class: `num${h.dropped > h.frames * 0.05 ? " gh-over" : ""}`,
+              text: h.frames.toLocaleString(),
+              title: h.dropped
+                ? `${h.dropped} frame${h.dropped === 1 ? "" : "s"} lost`
+                : "No frames lost",
+            }),
+          ];
+        };
+        table.replaceChildren(
+          el(
+            "table",
+            { class: "gh-table" },
+            el(
+              "thead",
+              null,
+              el(
+                "tr",
+                null,
+                el("th", { text: "Hour" }),
+                ...nights.flatMap((n, i) => [
+                  el("th", {
+                    class: `num${i ? " gh-split" : ""}`,
+                    text: `${n.label} RMS`,
+                  }),
+                  el("th", { class: "num", text: "RA / Dec" }),
+                  el("th", { class: "num", text: "Frames" }),
+                ]),
+              ),
+            ),
+            el(
+              "tbody",
+              null,
+              ...[...rows.entries()]
+                .sort((a, b) => a[0] - b[0])
+                .map(([, r]) =>
+                  el(
+                    "tr",
+                    null,
+                    el("td", { text: fmt.hm(r.at) }),
+                    ...nights.flatMap((_, i) => {
+                      const c = cells(r.cells[i]);
+                      if (i) c[0].classList.add("gh-split");
+                      return c;
+                    }),
+                  ),
+                ),
+            ),
+          ),
+        );
+        note.textContent =
+          "From PHD2's guide logs on the NINA PC. Nights run noon to noon; frames while settling after a dither are left out.";
+      };
+      return (kind) => {
+        if (
+          kind === "guideHistory" ||
+          kind === "all" ||
+          (feed.guideHistory && !rendered)
+        )
+          render();
       };
     },
   },

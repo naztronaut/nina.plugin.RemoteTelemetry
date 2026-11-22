@@ -644,6 +644,55 @@
         }
       }
     },
+    "/api/v1/guiding/history": {
+      "get": {
+        "tags": ["Guiding"],
+        "summary": "Hourly guiding RMS for tonight and last night",
+        "description": "Read from PHD2's guide logs (PHD2_GuideLog_*.txt in Documents\\PHD2 on the NINA PC). Nights run noon to noon in the PC's local time. RMS is the standard deviation of the RA/Dec error in arcseconds, as PHD2 reports it; frames while settling after a dither are excluded. Cached for 60 seconds.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": {
+                      "type": "boolean",
+                      "description": "False when the PHD2 log folder does not exist"
+                    },
+                    "folder": { "type": "string" },
+                    "error": { "type": "string", "nullable": true },
+                    "nights": {
+                      "type": "array",
+                      "description": "Tonight first, then last night",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "label": { "type": "string", "example": "Tonight" },
+                          "startUtc": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "endUtc": { "type": "string", "format": "date-time" },
+                          "overall": {
+                            "$ref": "#/components/schemas/GuideRms"
+                          },
+                          "hours": {
+                            "type": "array",
+                            "items": { "$ref": "#/components/schemas/GuideRms" }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/autofocus": {
       "get": {
         "tags": ["Autofocus"],
@@ -895,6 +944,37 @@
       }
     },
     "schemas": {
+      "GuideRms": {
+        "type": "object",
+        "properties": {
+          "startUtc": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Start of the hour (null for a night's overall figures)"
+          },
+          "frames": { "type": "integer", "description": "Guide frames used" },
+          "dropped": {
+            "type": "integer",
+            "description": "Frames where the star was lost"
+          },
+          "ra": {
+            "type": "number",
+            "nullable": true,
+            "description": "RA RMS in arcseconds"
+          },
+          "dec": {
+            "type": "number",
+            "nullable": true,
+            "description": "Dec RMS in arcseconds"
+          },
+          "total": {
+            "type": "number",
+            "nullable": true,
+            "description": "Total RMS in arcseconds"
+          }
+        }
+      },
       "Error": {
         "type": "object",
         "properties": {

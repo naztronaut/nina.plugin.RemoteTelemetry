@@ -59,6 +59,7 @@ Each card's camera button saves a snapshot of that card as JPG or copies it to t
 - **Cards** can be collapsed with the chevron (Log and Errors & warnings start collapsed). In **Edit layout**, drag cards to reorder them (or use ◀ ▶), and **Reset layout** restores the default cards.
 - **Last frame**: click the preview to open a viewer with zoom (wheel, pinch, +/−, double-click), pan (drag) and the 12 most recent frames (← →).
 - **Guiding**: hover or tap the graph for a step's values; an optional target band shades the error you're happy with; RMS is shown for the last 20 steps and for the visible window.
+- **Guiding history**: average RMS by hour for tonight and last night side by side, from PHD2's guide logs (`Documents\PHD2` on the NINA PC; nights run noon to noon, settling after dithers is left out). Hours above the Guiding card's target band are highlighted.
 - **Compact** (top bar) shrinks text and spacing for small screens or wall displays.
 
 ### Hosted dashboard
@@ -86,6 +87,7 @@ All responses are JSON (camelCase, UTC timestamps, `null` for unavailable values
 | `GET /api/v1/logs?limit=200&level=Info&after=<id>` | Log tail; `after` returns only newer entries                                                                                                                                                   |
 | `GET /api/v1/issues?limit=100`                     | Recent warnings/errors/fatals                                                                                                                                                                  |
 | `GET /api/v1/guiding?after=<unixMs>&limit=600`     | Guide steps (RA/Dec error in px and ″, correction pulses in ms) and dither times; `after` returns only newer steps                                                                             |
+| `GET /api/v1/guiding/history`                      | Hourly guiding RMS (total, RA, Dec in ″, frames, lost frames) for tonight and last night, read from PHD2's guide logs in `Documents\PHD2`                                                      |
 | `GET /api/v1/scheduler`                            | Target Scheduler right now: imaging / waiting / stopped, project, target, filter, exposure, when the target sets                                                                               |
 | `GET /api/v1/scheduler/plan`                       | Tonight's plan (Target Scheduler preview), refreshed automatically once an hour                                                                                                                |
 | `POST /api/v1/scheduler/plan/refresh`              | Re-run the preview now (15 s cooldown). Changes nothing in NINA                                                                                                                                |
