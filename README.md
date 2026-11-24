@@ -53,6 +53,8 @@ Each NINA is polled once no matter how many cards use it.
 
 **Config** (top bar) exports your devices, layout and display settings to a JSON file (optionally including API keys) and imports it again, e.g. to move to another browser or as a backup. Everything is stored only in the browser.
 
+**Cards per NINA** (in Config, or **Cards** next to a device in Devices) chooses which cards each NINA shows. Unticked cards disappear from the Full view, My dashboard and Add card for that NINA, and the dashboard stops requesting their data. The choice is saved per device and included in config exports.
+
 Each card's camera button saves a snapshot of that card as JPG or copies it to the clipboard (copying needs an `https://` or `localhost` page).
 
 - **At a glance**: the Full view starts with a strip showing safety, sequence/exposure, target and filter, guiding RMS, HFR trend, time to the meridian flip and time to astronomical dawn/dark at the observatory.

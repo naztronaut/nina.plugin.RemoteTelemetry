@@ -186,6 +186,8 @@ const saveLayout = () =>
   localStorage.setItem(KEYS.layout, JSON.stringify(layout));
 const saveView = () => localStorage.setItem(KEYS.view, currentView);
 const deviceById = (id) => devices.find((d) => d.id === id);
+// Each device stores the card types the user turned off, so new cards default to on.
+const shows = (dev, type) => !dev?.hidden?.includes(type);
 
 // ---------- API ----------
 
@@ -3965,7 +3967,10 @@ function renderView() {
   if (!hasDevices) return;
 
   if (custom) {
-    const cards = layout.filter((c) => deviceById(c.deviceId));
+    const cards = layout.filter((c) => {
+      const d = deviceById(c.deviceId);
+      return d && shows(d, c.type);
+    });
     if (!cards.length) {
       view.append(
         el(
@@ -3994,7 +3999,13 @@ function renderView() {
     view.append(...cards.map((c) => buildCard(c, true)));
   } else {
     const deviceId = currentView.slice(7);
-    const feed = feedFor(deviceById(deviceId));
+    const dev = deviceById(deviceId);
+    const feed = feedFor(dev);
+    const shown = Object.entries(CARDS).filter(([type]) => shows(dev, type));
+    const hasTs = shown.some(
+      ([, def]) => def.tabs?.includes("ts") && !def.tabs.includes("overview"),
+    );
+    if (!hasTs) deviceTab = "overview";
     const tabButton = (id, label) => {
       const b = el(
         "button",
@@ -4022,15 +4033,15 @@ function renderView() {
     );
     // The tab only appears once this NINA reports a reachable Target Scheduler.
     const syncTsTab = () => {
-      tsTab.hidden = deviceTab !== "ts" && !tsAvailable(feed);
+      tsTab.hidden = !hasTs || (deviceTab !== "ts" && !tsAvailable(feed));
       nav.hidden = tsTab.hidden;
     };
     syncTsTab();
     unmounts.push(feed.subscribe({ needs: [], update: syncTsTab }));
     view.append(
       nav,
-      buildStrip(feed),
-      ...Object.entries(CARDS)
+      shows(dev, "strip") ? buildStrip(feed) : "",
+      ...shown
         .filter(([, def]) => (def.tabs ?? ["overview"]).includes(deviceTab))
         .map(([type, def]) =>
           buildCard({ type, deviceId, span: def.span }, false),
@@ -4214,21 +4225,27 @@ function buildStrip(feed) {
 // ---------- dialogs ----------
 
 function openCardDialog() {
-  $("cardType").replaceChildren(
-    ...Object.entries(CARDS).map(([k, d]) =>
-      el("option", { value: k, text: d.title }),
-    ),
-  );
   $("cardDevice").replaceChildren(
     ...devices.map((d) => el("option", { value: d.id, text: d.name })),
   );
+  fillCardTypes();
   $("cardDialog").showModal();
+}
+
+function fillCardTypes() {
+  const dev = deviceById($("cardDevice").value);
+  $("cardType").replaceChildren(
+    ...Object.entries(CARDS)
+      .filter(([k]) => shows(dev, k))
+      .map(([k, d]) => el("option", { value: k, text: d.title })),
+  );
+  $("cardAddBtn").disabled = !$("cardType").options.length;
 }
 
 function addCard() {
   const type = $("cardType").value;
   const deviceId = $("cardDevice").value;
-  if (!CARDS[type] || !deviceById(deviceId)) return;
+  if (!CARDS[type] || !shows(deviceById(deviceId), type)) return;
   layout.push({ id: newId(), type, deviceId, span: CARDS[type].span });
   saveLayout();
   $("cardDialog").close();
@@ -4259,6 +4276,18 @@ function renderDeviceList() {
             },
           },
           "View",
+        ),
+        el(
+          "button",
+          {
+            type: "button",
+            title: `Choose which cards to show for ${d.name}`,
+            onclick: () => {
+              $("devicesDialog").close();
+              openConfig(d.id);
+            },
+          },
+          "Cards",
         ),
         el(
           "button",
@@ -4367,9 +4396,13 @@ function exportConfig() {
     format: CONFIG_FORMAT,
     version: 1,
     exportedUtc: new Date().toISOString(),
-    devices: devices.map(({ id, name, url, key }) =>
-      withKeys && key ? { id, name, url, key } : { id, name, url },
-    ),
+    devices: devices.map(({ id, name, url, key, hidden }) => ({
+      id,
+      name,
+      url,
+      ...(withKeys && key ? { key } : {}),
+      ...(hidden?.length ? { hidden } : {}),
+    })),
     layout,
     view: currentView,
     settings,
@@ -4419,6 +4452,9 @@ function parseConfig(text) {
       url,
       name: str(d?.name, 120) || url,
       key: str(d?.key, 200) ?? "",
+      hidden: Array.isArray(d?.hidden)
+        ? [...new Set(d.hidden.filter((t) => MODULE_IDS.has(t)))]
+        : [],
     };
   });
   const ids = new Set(devs.map((d) => d.id));
@@ -4493,11 +4529,73 @@ function cfgNote(text) {
   $("cfgNote").hidden = !text;
 }
 
-function openConfig() {
+function openConfig(deviceId) {
   cfgNote("");
   $("cfgSummary").textContent =
     `${devices.length} device(s), ${layout.length} card(s) in "My dashboard".`;
+  $("modDevice").replaceChildren(
+    ...devices.map((d) => el("option", { value: d.id, text: d.name })),
+  );
+  const current =
+    typeof deviceId === "string"
+      ? deviceId
+      : currentView.startsWith("device:")
+        ? currentView.slice(7)
+        : devices[0]?.id;
+  if (deviceById(current)) $("modDevice").value = current;
+  renderModules();
   $("configDialog").showModal();
+}
+
+// ---------- cards per device ----------
+
+const MODULE_IDS = new Set(["strip", ...Object.keys(CARDS)]);
+
+function moduleGroups() {
+  const overview = [["strip", "At a glance strip"]];
+  const ts = [];
+  for (const [k, d] of Object.entries(CARDS))
+    (d.tabs && !d.tabs.includes("overview") ? ts : overview).push([k, d.title]);
+  return [
+    ["Overview", overview],
+    ["Target Scheduler", ts],
+  ];
+}
+
+function renderModules() {
+  const dev = deviceById($("modDevice").value);
+  $("modAll").disabled = !dev?.hidden?.length;
+  $("modList").replaceChildren(
+    ...(dev
+      ? moduleGroups().map(([group, items]) =>
+          el(
+            "div",
+            { class: "modgroup" },
+            el("div", { class: "muted small", text: group }),
+            ...items.map(([type, title]) => {
+              const box = el("input", {
+                type: "checkbox",
+                checked: shows(dev, type),
+              });
+              box.addEventListener("change", () =>
+                setModule(dev, type, box.checked),
+              );
+              return el("label", { class: "inline small" }, box, ` ${title}`);
+            }),
+          ),
+        )
+      : [el("p", { class: "muted small", text: "Add a NINA first." })]),
+  );
+}
+
+function setModule(dev, type, on) {
+  const hidden = new Set(dev.hidden ?? []);
+  if (on) hidden.delete(type);
+  else hidden.add(type);
+  dev.hidden = [...hidden];
+  saveDevices();
+  $("modAll").disabled = !dev.hidden.length;
+  renderView();
 }
 
 // ---------- boot ----------
@@ -4541,7 +4639,17 @@ async function init() {
   });
   $("addCardBtn").addEventListener("click", openCardDialog);
   $("cardAddBtn").addEventListener("click", addCard);
-  $("configBtn").addEventListener("click", openConfig);
+  $("cardDevice").addEventListener("change", fillCardTypes);
+  $("configBtn").addEventListener("click", () => openConfig());
+  $("modDevice").addEventListener("change", renderModules);
+  $("modAll").addEventListener("click", () => {
+    const dev = deviceById($("modDevice").value);
+    if (!dev) return;
+    dev.hidden = [];
+    saveDevices();
+    renderModules();
+    renderView();
+  });
   $("cfgExport").addEventListener("click", exportConfig);
   $("cfgImport").addEventListener("click", () => $("cfgFile").click());
   $("cfgFile").addEventListener("change", (e) =>

@@ -328,6 +328,19 @@ fieldset label.inline {
 fieldset p {
   margin: 0;
 }
+.modlist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.modgroup {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 4px 12px;
+}
+.modgroup > div {
+  grid-column: 1 / -1;
+}
 #emptyImportBtn {
   margin-left: 8px;
 }
