@@ -14,14 +14,38 @@
         <img src="logo.png" alt="" width="28" height="28" />
         <span>N.I.N.A. Remote Telemetry</span>
       </div>
-      <select id="viewSelect" aria-label="View"></select>
+      <select
+        id="viewSelect"
+        aria-label="View"
+        title="Switch between My dashboard and the Full view of one NINA"
+      ></select>
       <nav id="deviceChips" class="chips" aria-label="NINA devices"></nav>
       <div class="actions">
-        <button id="addCardBtn" type="button" class="primary" hidden>
+        <button
+          id="addCardBtn"
+          type="button"
+          class="primary"
+          title="Add a card from any NINA to My dashboard"
+          hidden
+        >
           Add card
         </button>
-        <button id="resetLayoutBtn" type="button" hidden>Reset layout</button>
-        <button id="editBtn" type="button" hidden>Edit layout</button>
+        <button
+          id="resetLayoutBtn"
+          type="button"
+          title="Replace My dashboard with the default cards for each NINA"
+          hidden
+        >
+          Reset layout
+        </button>
+        <button
+          id="editBtn"
+          type="button"
+          title="Add, move, resize or remove cards on My dashboard"
+          hidden
+        >
+          Edit layout
+        </button>
         <select
           id="timeMode"
           aria-label="Time zone for displayed times"
@@ -46,13 +70,27 @@
         >
           Night
         </button>
-        <button id="manageBtn" type="button">Devices</button>
+        <button
+          id="manageBtn"
+          type="button"
+          title="Add or remove NINA devices and choose their cards"
+        >
+          Devices
+        </button>
         <button
           id="configBtn"
           type="button"
-          title="Export or import your devices and layout"
+          title="Choose cards per NINA, and export or import your setup"
         >
           Config
+        </button>
+        <button
+          id="helpBtn"
+          type="button"
+          title="What's on the screen and where to get help (shortcut: ?)"
+          aria-keyshortcuts="?"
+        >
+          Help
         </button>
       </div>
     </header>
@@ -136,6 +174,13 @@
           <div id="modList" class="modlist"></div>
           <div>
             <button id="modAll" type="button">Show all</button>
+            <button
+              id="modDefaults"
+              type="button"
+              title="Log, Errors &amp; warnings and Guiding history off; everything else on"
+            >
+              Defaults
+            </button>
           </div>
         </fieldset>
         <fieldset>
@@ -172,6 +217,108 @@
           </div>
         </fieldset>
         <p id="cfgNote" class="small" hidden></p>
+        <div class="right">
+          <button value="close" formnovalidate>Close</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="helpDialog" aria-labelledby="helpTitle">
+      <form method="dialog" class="dialog help">
+        <h2 id="helpTitle" tabindex="-1" autofocus>Help</h2>
+        <p class="small">
+          This dashboard shows what N.I.N.A. is doing on one or more observatory
+          PCs. It is read-only: nothing here can control NINA.
+        </p>
+
+        <h3>Getting around</h3>
+        <ul class="small">
+          <li>
+            <strong>View</strong> (top left): <em>My dashboard</em> is your own
+            mix of cards from any NINA; <em>Full view</em> shows every card for
+            one NINA.
+          </li>
+          <li>
+            <strong>Device chips</strong>: one per NINA. The dot is green when
+            all is well, amber when unsafe or there are errors, red when
+            offline; ▶ means a sequence is running. Click a chip to open its
+            Full view.
+          </li>
+          <li>
+            <strong>Tabs</strong> in the Full view: Overview, and Target
+            Scheduler when that plugin is in use.
+          </li>
+          <li>
+            <strong>Cards</strong>: the chevron (or the title) collapses a card;
+            the camera button saves a snapshot. Hover a card title to see what
+            it shows.
+          </li>
+          <li>
+            <strong>Devices</strong> adds NINAs; <strong>Config</strong> picks
+            which cards each NINA shows and exports or imports your setup.
+            <strong>Edit layout</strong> rearranges My dashboard.
+          </li>
+          <li>
+            <strong>Observatory time / My time</strong> picks the time zone for
+            all times; <strong>Compact</strong> and <strong>Night</strong>
+            change the display.
+          </li>
+        </ul>
+
+        <h3>Cards</h3>
+        <dl id="helpCards" class="help-cards small"></dl>
+
+        <h3>Keyboard</h3>
+        <ul class="small">
+          <li>
+            <kbd>Tab</kbd> moves between controls; the first stop skips to the
+            dashboard.
+          </li>
+          <li>
+            <kbd>?</kbd> opens this help; <kbd>Esc</kbd> closes any dialog.
+          </li>
+          <li>
+            Frame viewer: <kbd>←</kbd> <kbd>→</kbd> older / newer frame,
+            <kbd>+</kbd> <kbd>−</kbd> zoom, <kbd>0</kbd> fit, <kbd>1</kbd>
+            actual size.
+          </li>
+        </ul>
+
+        <h3>Getting help</h3>
+        <ul class="small">
+          <li>
+            <a
+              href="https://github.com/naztronaut/nina.plugin.RemoteTelemetry#readme"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Read the documentation</a
+            >
+            (setup, Tailscale, API key, hosted dashboard).
+          </li>
+          <li>
+            <a
+              href="https://github.com/naztronaut/nina.plugin.RemoteTelemetry/issues"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Report a problem or request a feature</a
+            >
+            on GitHub. Include the NINA and plugin versions and any messages
+            from the Errors &amp; warnings card.
+          </li>
+          <li>
+            <a
+              href="https://discord.gg/yXKqrawpjr"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Ask on the Naztronomy Discord</a
+            >.
+          </li>
+          <li>
+            A card that says <em>offline</em> can't reach that NINA: check the
+            PC is on, NINA is running with the plugin enabled, and the address
+            and API key in Devices.
+          </li>
+        </ul>
         <div class="right">
           <button value="close" formnovalidate>Close</button>
         </div>

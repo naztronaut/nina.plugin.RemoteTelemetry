@@ -83,8 +83,9 @@ button:focus-visible {
   top: 0;
   z-index: 5;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: 8px 16px;
   padding: 10px 16px;
   background: var(--topbar);
   border-bottom: 1px solid var(--border);
@@ -109,14 +110,16 @@ button:focus-visible {
 .chips {
   display: flex;
   gap: 8px;
-  flex: 1;
+  flex: 1 1 160px;
   overflow-x: auto;
 }
 .actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   white-space: nowrap;
+  margin-left: auto;
 }
 
 .chip {
@@ -831,6 +834,55 @@ dialog::backdrop {
 }
 .dialog h2 {
   margin: 0;
+}
+#helpDialog {
+  width: min(720px, 94vw);
+}
+#helpTitle:focus {
+  outline: none;
+}
+.help h3 {
+  margin: 4px 0 0;
+  font-size: 14px;
+}
+.help ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.help a {
+  color: var(--accent);
+}
+.help-cards {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+.help-cards dt {
+  font-weight: 600;
+}
+.help-cards dd {
+  margin: 0;
+  color: var(--muted);
+}
+kbd {
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 0.9em;
+}
+@media (max-width: 640px) {
+  .help-cards {
+    grid-template-columns: 1fr;
+  }
+  .help-cards dd {
+    margin-bottom: 6px;
+  }
 }
 fieldset {
   border: 1px solid var(--border);

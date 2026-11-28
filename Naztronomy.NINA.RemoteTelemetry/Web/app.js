@@ -175,7 +175,10 @@ function readJson(key, fallback) {
 }
 
 function loadState() {
-  devices = readJson(KEYS.devices, []);
+  devices = readJson(KEYS.devices, []).map(({ hidden, ...d }) => ({
+    ...d,
+    cards: cardOverrides({ hidden, cards: d.cards }),
+  }));
   layout = readJson(KEYS.layout, []).filter((c) => CARDS[c.type]);
   currentView = localStorage.getItem(KEYS.view) || "custom";
 }
@@ -186,8 +189,10 @@ const saveLayout = () =>
   localStorage.setItem(KEYS.layout, JSON.stringify(layout));
 const saveView = () => localStorage.setItem(KEYS.view, currentView);
 const deviceById = (id) => devices.find((d) => d.id === id);
-// Each device stores the card types the user turned off, so new cards default to on.
-const shows = (dev, type) => !dev?.hidden?.includes(type);
+// Cards that are off until the user turns them on for a NINA.
+const DEFAULT_OFF = new Set(["logs", "issues", "guideHistory"]);
+// dev.cards holds only the user's overrides ({ type: true|false }).
+const shows = (dev, type) => dev?.cards?.[type] ?? !DEFAULT_OFF.has(type);
 
 // ---------- API ----------
 
@@ -543,21 +548,33 @@ function setHealth(dev, status, error) {
   }
 }
 
+function healthText(h) {
+  if (!h) return "checking";
+  if (!h.online) return `offline${h.error ? ` (${h.error})` : ""}`;
+  const parts = [h.safety === "unsafe" ? "unsafe" : "online"];
+  if (h.errors > 0) parts.push(`${h.errors} error${h.errors === 1 ? "" : "s"}`);
+  if (h.running) parts.push("sequence running");
+  return parts.join(", ");
+}
+
 function renderChips() {
   $("deviceChips").replaceChildren(
     ...devices.map((d) => {
       const h = health.get(d.id);
+      const active = currentView === `device:${d.id}`;
       return el(
         "button",
         {
-          class: `chip${currentView === `device:${d.id}` ? " active" : ""}`,
+          class: `chip${active ? " active" : ""}`,
           type: "button",
+          "aria-label": `${d.name}: ${healthText(h)}`,
+          "aria-current": active ? "page" : null,
           title: h?.online
             ? `${d.url}${h.target ? ` — ${h.target}` : ""}`
             : `${d.url} — ${h?.error || "offline"}`,
           onclick: () => setView(`device:${d.id}`),
         },
-        el("span", { class: `dot ${healthClass(h)}` }),
+        el("span", { class: `dot ${healthClass(h)}`, "aria-hidden": "true" }),
         h?.online && h.running ? `${d.name} ▶` : d.name,
       );
     }),
@@ -2308,7 +2325,11 @@ const CARDS = {
         opt("2", "Target ±2″"),
       );
       band.value = localStorage.getItem(bandKey) || "0";
-      const canvas = el("canvas", { height: 200 });
+      const canvas = el("canvas", {
+        height: 200,
+        role: "img",
+        "aria-label": "Guide graph of RA and Dec error",
+      });
       const stats = el("div", { class: "muted small" });
       const dl = el("dl", { class: "kv" });
       body.append(
@@ -2348,6 +2369,10 @@ const CARDS = {
           hover,
         );
         stats.textContent = graph.stats;
+        canvas.setAttribute(
+          "aria-label",
+          `Guide graph of RA and Dec error. ${graph.stats || "No guide steps yet."}`,
+        );
       };
       band.addEventListener("change", () =>
         localStorage.setItem(bandKey, band.value),
@@ -2577,7 +2602,12 @@ const CARDS = {
     span: 2,
     needs: ["history"],
     mount(body, feed, onDispose) {
-      const canvas = el("canvas", { height: 180 });
+      const canvas = el("canvas", {
+        height: 180,
+        role: "img",
+        "aria-label":
+          "Chart of HFR and star count for recent light frames. The Image history card lists the values.",
+      });
       body.append(
         canvas,
         el(
@@ -2614,7 +2644,12 @@ const CARDS = {
     available: (feed) => !feed.autofocus || feed.autofocus.available,
     mount(body, feed, onDispose) {
       const head = el("div", { class: "muted small" });
-      const canvas = el("canvas", { height: 200 });
+      const canvas = el("canvas", {
+        height: 200,
+        role: "img",
+        "aria-label":
+          "Autofocus curve: measured focus points and the chosen position. The values are listed below.",
+      });
       const dl = el("dl", { class: "kv" });
       const recent = el("div", { class: "tablewrap" });
       body.append(head, canvas, dl, recent);
@@ -2865,6 +2900,39 @@ const CARDS = {
       };
     },
   },
+};
+
+// Shown as card-title tooltips, in Config and in Help.
+const CARD_HELP = {
+  strip:
+    "One line at the top of the Full view: safety, sequence, target, guiding RMS, HFR trend, meridian flip and time to dawn or dark.",
+  session:
+    "Which NINA this is, its version, the current target and the observatory's time.",
+  schedulerNow:
+    "What Target Scheduler is doing right now: imaging, waiting or stopped, and which target and filter.",
+  schedulerPlan:
+    "Tonight's plan from Target Scheduler: which targets it expects to image and when.",
+  schedulerProgress:
+    "Every Target Scheduler project and target with how much is done, left and imaged, per filter.",
+  sequenceTargets:
+    "Targets in the Advanced Sequencer with frames done and time remaining for each.",
+  allsky: "The latest image from your all-sky camera.",
+  frame:
+    "The last saved frame. Click it to open a viewer with zoom and the 12 most recent frames.",
+  equipment: "Connection state and key readings of every device in NINA.",
+  weather: "Readings from the weather device connected to NINA.",
+  guiding:
+    "Live guide graph of RA and Dec error with RMS. Hover or tap the graph for a step's values.",
+  guideHistory:
+    "Average guiding RMS by hour for tonight and last night, read from PHD2's guide logs.",
+  chart:
+    "HFR and star count of recent light frames, to spot focus or cloud problems.",
+  autofocus:
+    "The latest autofocus curve with the chosen position, plus recent focus positions.",
+  issues: "Recent warnings and errors from NINA's log.",
+  logs: "NINA's log as it happens.",
+  history:
+    "A table of recently saved frames with exposure, HFR, stars and more.",
 };
 
 function drawChart(canvas, points, tz) {
@@ -3226,7 +3294,11 @@ function buildCard(cfg, custom) {
     title: "Collapse / expand",
     "aria-label": `Collapse or expand ${def.title}`,
   });
-  const title = el("span", { class: "card-title", text: def.title });
+  const title = el("span", {
+    class: "card-title",
+    text: def.title,
+    title: `${CARD_HELP[cfg.type] ?? def.title} Click to collapse or expand.`,
+  });
   const head = el(
     "h2",
     null,
@@ -4100,10 +4172,12 @@ function nextDarkChange(lat, lon, now = new Date()) {
 }
 
 function buildStrip(feed) {
+  // Not a live region: it refreshes every few seconds and would keep interrupting screen readers.
   const strip = el("div", {
     class: "strip span-4",
-    role: "status",
+    role: "region",
     "aria-label": "At a glance",
+    title: CARD_HELP.strip,
   });
   let twilight = null;
   let twilightAt = 0;
@@ -4396,12 +4470,12 @@ function exportConfig() {
     format: CONFIG_FORMAT,
     version: 1,
     exportedUtc: new Date().toISOString(),
-    devices: devices.map(({ id, name, url, key, hidden }) => ({
+    devices: devices.map(({ id, name, url, key, cards }) => ({
       id,
       name,
       url,
       ...(withKeys && key ? { key } : {}),
-      ...(hidden?.length ? { hidden } : {}),
+      ...(cards && Object.keys(cards).length ? { cards } : {}),
     })),
     layout,
     view: currentView,
@@ -4452,9 +4526,7 @@ function parseConfig(text) {
       url,
       name: str(d?.name, 120) || url,
       key: str(d?.key, 200) ?? "",
-      hidden: Array.isArray(d?.hidden)
-        ? [...new Set(d.hidden.filter((t) => MODULE_IDS.has(t)))]
-        : [],
+      cards: cardOverrides(d),
     };
   });
   const ids = new Set(devs.map((d) => d.id));
@@ -4551,6 +4623,17 @@ function openConfig(deviceId) {
 
 const MODULE_IDS = new Set(["strip", ...Object.keys(CARDS)]);
 
+/** Valid overrides from a stored or imported device; also reads the earlier `hidden` list. */
+function cardOverrides(d) {
+  const out = {};
+  if (Array.isArray(d?.hidden))
+    for (const t of d.hidden) if (MODULE_IDS.has(t)) out[t] = false;
+  if (d?.cards && typeof d.cards === "object")
+    for (const [t, v] of Object.entries(d.cards))
+      if (MODULE_IDS.has(t) && typeof v === "boolean") out[t] = v;
+  return out;
+}
+
 function moduleGroups() {
   const overview = [["strip", "At a glance strip"]];
   const ts = [];
@@ -4564,7 +4647,7 @@ function moduleGroups() {
 
 function renderModules() {
   const dev = deviceById($("modDevice").value);
-  $("modAll").disabled = !dev?.hidden?.length;
+  $("modAll").disabled = $("modDefaults").disabled = !dev;
   $("modList").replaceChildren(
     ...(dev
       ? moduleGroups().map(([group, items]) =>
@@ -4580,7 +4663,15 @@ function renderModules() {
               box.addEventListener("change", () =>
                 setModule(dev, type, box.checked),
               );
-              return el("label", { class: "inline small" }, box, ` ${title}`);
+              return el(
+                "label",
+                {
+                  class: "inline small",
+                  title: CARD_HELP[type] || "",
+                },
+                box,
+                ` ${title}${DEFAULT_OFF.has(type) ? " (off by default)" : ""}`,
+              );
             }),
           ),
         )
@@ -4589,16 +4680,40 @@ function renderModules() {
 }
 
 function setModule(dev, type, on) {
-  const hidden = new Set(dev.hidden ?? []);
-  if (on) hidden.delete(type);
-  else hidden.add(type);
-  dev.hidden = [...hidden];
+  const cards = { ...dev.cards };
+  if (on === !DEFAULT_OFF.has(type)) delete cards[type];
+  else cards[type] = on;
+  dev.cards = cards;
   saveDevices();
-  $("modAll").disabled = !dev.hidden.length;
+  renderView();
+}
+
+function setAllModules(on) {
+  const dev = deviceById($("modDevice").value);
+  if (!dev) return;
+  dev.cards = {};
+  if (on) for (const t of DEFAULT_OFF) dev.cards[t] = true;
+  saveDevices();
+  renderModules();
   renderView();
 }
 
 // ---------- boot ----------
+
+function openHelp() {
+  $("helpCards").replaceChildren(
+    ...moduleGroups().flatMap(([, items]) =>
+      items.flatMap(([type, title]) => [
+        el("dt", {
+          text: `${title}${DEFAULT_OFF.has(type) ? " (off by default; turn on in Config)" : ""}`,
+        }),
+        el("dd", { text: CARD_HELP[type] ?? "" }),
+      ]),
+    ),
+  );
+  $("helpDialog").showModal();
+  $("helpDialog").scrollTop = 0;
+}
 
 async function init() {
   const toggle = (btnId, cls, key) => {
@@ -4642,13 +4757,16 @@ async function init() {
   $("cardDevice").addEventListener("change", fillCardTypes);
   $("configBtn").addEventListener("click", () => openConfig());
   $("modDevice").addEventListener("change", renderModules);
-  $("modAll").addEventListener("click", () => {
-    const dev = deviceById($("modDevice").value);
-    if (!dev) return;
-    dev.hidden = [];
-    saveDevices();
-    renderModules();
-    renderView();
+  $("modAll").addEventListener("click", () => setAllModules(true));
+  $("modDefaults").addEventListener("click", () => setAllModules(false));
+  $("helpBtn").addEventListener("click", openHelp);
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "?" || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (document.querySelector("dialog[open]")) return;
+    if (e.target.closest?.("input, select, textarea, [contenteditable]"))
+      return;
+    e.preventDefault();
+    openHelp();
   });
   $("cfgExport").addEventListener("click", exportConfig);
   $("cfgImport").addEventListener("click", () => $("cfgFile").click());

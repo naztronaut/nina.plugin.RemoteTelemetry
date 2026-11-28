@@ -53,7 +53,9 @@ Each NINA is polled once no matter how many cards use it.
 
 **Config** (top bar) exports your devices, layout and display settings to a JSON file (optionally including API keys) and imports it again, e.g. to move to another browser or as a backup. Everything is stored only in the browser.
 
-**Cards per NINA** (in Config, or **Cards** next to a device in Devices) chooses which cards each NINA shows. Unticked cards disappear from the Full view, My dashboard and Add card for that NINA, and the dashboard stops requesting their data. The choice is saved per device and included in config exports.
+**Cards per NINA** (in Config, or **Cards** next to a device in Devices) chooses which cards each NINA shows. Unticked cards disappear from the Full view, My dashboard and Add card for that NINA, and the dashboard stops requesting their data. The choice is saved per device and included in config exports. Log, Errors & warnings and Guiding history start off; tick them to turn them on.
+
+**Help** (top bar, or press `?`) explains each part of the screen and every card, lists keyboard shortcuts and links to the documentation, GitHub issues and Discord. Card titles and top-bar buttons also have tooltips.
 
 Each card's camera button saves a snapshot of that card as JPG or copies it to the clipboard (copying needs an `https://` or `localhost` page).
 
